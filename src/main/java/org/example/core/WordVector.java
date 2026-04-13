@@ -1,4 +1,4 @@
-package org.example;
+package org.example.core;
 
 // This class represents a single word and its vector of numbers
 public class WordVector {

@@ -1,4 +1,10 @@
-package org.example;
+package org.example.app;
+
+import org.example.core.SpaceManager;
+import org.example.data.DataLoader;
+import org.example.integration.PythonBridge;
+import org.example.metrics.CosineSimilarity;
+import org.example.metrics.DistanceMetric;
 
 // The main entry point of the application
 public class Main {

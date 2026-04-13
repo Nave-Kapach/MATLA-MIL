@@ -1,4 +1,4 @@
-package org.example;
+package org.example.command;
 
 import java.util.Stack;
 

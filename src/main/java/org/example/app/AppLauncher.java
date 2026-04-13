@@ -1,4 +1,6 @@
-package org.example;
+package org.example.app;
+
+import org.example.UI.MainApp;
 
 // This class acts as a workaround to launch JavaFX without module issues
 public class AppLauncher {

@@ -1,4 +1,6 @@
-package org.example;
+package org.example.data;
+
+import org.example.core.SpaceManager;
 
 import java.io.BufferedReader;
 import java.io.FileReader;

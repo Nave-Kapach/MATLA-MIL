@@ -1,4 +1,4 @@
-package org.example;
+package org.example.UI;
 
 import javafx.geometry.Point3D;
 import javafx.scene.Group;
@@ -15,6 +15,7 @@ import javafx.scene.text.Text;
 import javafx.scene.transform.Rotate;
 import javafx.scene.transform.Translate;
 import javafx.stage.Stage;
+import org.example.core.SpaceManager;
 
 import java.util.HashMap;
 import java.util.List;

@@ -1,4 +1,4 @@
-package org.example;
+package org.example.UI;
 
 import javafx.application.Application;
 import javafx.collections.FXCollections;
@@ -12,6 +12,15 @@ import javafx.scene.shape.Circle;
 import javafx.scene.shape.Line;
 import javafx.scene.text.Text;
 import javafx.stage.Stage;
+import org.example.command.Command;
+import org.example.command.CommandManager;
+import org.example.core.SpaceManager;
+import org.example.core.WordVector;
+import org.example.data.DataLoader;
+import org.example.integration.PythonBridge;
+import org.example.metrics.CosineSimilarity;
+import org.example.metrics.DistanceMetric;
+import org.example.metrics.EuclideanDistance;
 
 import java.util.ArrayList;
 import java.util.Arrays;

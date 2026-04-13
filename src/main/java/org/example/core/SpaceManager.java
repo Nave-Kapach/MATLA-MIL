@@ -1,4 +1,6 @@
-package org.example;
+package org.example.core;
+
+import org.example.metrics.DistanceMetric;
 
 import java.util.*;
 
