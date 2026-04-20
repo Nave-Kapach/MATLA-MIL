@@ -1,6 +1,7 @@
 package org.example.UI;
 
 import javafx.geometry.Point3D;
+import javafx.scene.AmbientLight;
 import javafx.scene.Group;
 import javafx.scene.PerspectiveCamera;
 import javafx.scene.Scene;
@@ -46,7 +47,8 @@ public class Space3DViewer {
         Rotate rotateY = new Rotate(0, Rotate.Y_AXIS);
         world.getTransforms().addAll(rotateX, rotateY);
 
-        PhongMaterial defaultMat = new PhongMaterial(Color.DEEPSKYBLUE);
+        // Materials update for visibility on black background
+        PhongMaterial defaultMat = new PhongMaterial(Color.WHITE);
         PhongMaterial w1Mat = new PhongMaterial(Color.GREEN);
         PhongMaterial w2Mat = new PhongMaterial(Color.RED);
         PhongMaterial w3Mat = new PhongMaterial(Color.BLUE);
@@ -65,13 +67,13 @@ public class Space3DViewer {
             pointsMap.put(word, point);
 
             PhongMaterial currentMat = defaultMat;
-            double radius = 8;
+            double radius = 10;
 
-            if (word.equals(w1)) { currentMat = w1Mat; radius = 15; }
-            else if (word.equals(w2)) { currentMat = w2Mat; radius = 15; }
-            else if (word.equals(w3)) { currentMat = w3Mat; radius = 15; }
-            else if (word.equals(closest)) { currentMat = closestMat; radius = 20; }
-            else if (highlightedGroup != null && highlightedGroup.contains(word)) { currentMat = groupMat; radius = 15; }
+            if (word.equals(w1)) { currentMat = w1Mat; radius = 18; }
+            else if (word.equals(w2)) { currentMat = w2Mat; radius = 18; }
+            else if (word.equals(w3)) { currentMat = w3Mat; radius = 18; }
+            else if (word.equals(closest)) { currentMat = closestMat; radius = 25; }
+            else if (highlightedGroup != null && highlightedGroup.contains(word)) { currentMat = groupMat; radius = 18; }
 
             Sphere sphere = new Sphere(radius);
             sphere.setMaterial(currentMat);
@@ -81,18 +83,13 @@ public class Space3DViewer {
 
             Text label = new Text(word);
             label.setFont(Font.font("Arial", FontWeight.BOLD, 14));
-            label.setFill(Color.DARKSLATEGRAY);
+            label.setFill(Color.WHITE);
 
-            // --- טריק ה-Billboarding ---
-            // יוצרים סיבוב נגדי (הפוך לזווית של העולם) כדי שהטקסט תמיד יפנה אלינו
             Rotate counterRotY = new Rotate(0, Rotate.Y_AXIS);
             Rotate counterRotX = new Rotate(0, Rotate.X_AXIS);
-
-            // קושרים את הזווית של הטקסט להיות המינוס של זווית העולם
             counterRotY.angleProperty().bind(rotateY.angleProperty().multiply(-1));
             counterRotX.angleProperty().bind(rotateX.angleProperty().multiply(-1));
 
-            // קודם מזיזים את הטקסט למקום שלו (Translate), ואז מחילים את הסיבובים הנגדיים
             label.getTransforms().addAll(
                     new Translate(x + radius + 8, y, z),
                     counterRotY,
@@ -102,23 +99,33 @@ public class Space3DViewer {
             world.getChildren().addAll(sphere, label);
         }
 
-        // --- ציור קו האנלוגיה ב-3D ---
-        if (w1 != null && closest != null && pointsMap.containsKey(w1) && pointsMap.containsKey(closest)) {
+        // --- Multi-line Analogy Path (Requirement 3.2) ---
+        if (w1 != null && w2 != null && w3 != null && closest != null) {
             Point3D p1 = pointsMap.get(w1);
-            Point3D p2 = pointsMap.get(closest);
-            Cylinder line = createLine(p1, p2, new PhongMaterial(Color.ORANGE), 3);
-            world.getChildren().add(line);
+            Point3D p2 = pointsMap.get(w2);
+            Point3D p3 = pointsMap.get(w3);
+            Point3D pRes = pointsMap.get(closest);
+
+            if (p1 != null && p2 != null && p3 != null && pRes != null) {
+                // Line 1: The learned relation (V2 -> V1) - White and thin
+                Cylinder baseLine = createLine(p2, p1, new PhongMaterial(Color.WHITE), 1.5);
+
+                // Line 2: The applied relation (V3 -> Result) - Orange and thick
+                Cylinder analogyLine = createLine(p3, pRes, new PhongMaterial(Color.ORANGE), 3.5);
+
+                world.getChildren().addAll(baseLine, analogyLine);
+            }
         }
 
-        // --- ציור נקודת ה-Centroid והקווים לשכנים ב-3D ---
+        // --- Centroid & Neighbors ---
         if (centroidVec != null && neighbors != null) {
             double cx = centroidVec[0] * SCALE;
             double cy = centroidVec[1] * SCALE;
             double cz = (centroidVec.length > 2) ? centroidVec[2] * SCALE : 0;
             Point3D cPos = new Point3D(cx, cy, cz);
 
-            Sphere centroidSphere = new Sphere(12);
-            centroidSphere.setMaterial(new PhongMaterial(Color.DARKMAGENTA));
+            Sphere centroidSphere = new Sphere(15);
+            centroidSphere.setMaterial(new PhongMaterial(Color.MAGENTA));
             centroidSphere.setTranslateX(cx);
             centroidSphere.setTranslateY(cy);
             centroidSphere.setTranslateZ(cz);
@@ -127,7 +134,7 @@ public class Space3DViewer {
             for (SpaceManager.WordDistancePair pair : neighbors) {
                 Point3D nPos = pointsMap.get(pair.getWord());
                 if (nPos != null) {
-                    Cylinder line = createLine(cPos, nPos, new PhongMaterial(Color.MAGENTA), 1.5);
+                    Cylinder line = createLine(cPos, nPos, new PhongMaterial(Color.YELLOW), 2);
                     world.getChildren().add(line);
                 }
             }
@@ -139,8 +146,12 @@ public class Space3DViewer {
         PerspectiveCamera camera = new PerspectiveCamera(false);
         camera.setTranslateZ(-2500);
 
+        // --- Ambient Light for visibility ---
+        AmbientLight light = new AmbientLight(Color.WHITE);
+        world.getChildren().add(light);
+
         Scene scene = new Scene(world, 1000, 800, true, SceneAntialiasing.BALANCED);
-        scene.setFill(Color.web("#e0e7ee"));
+        scene.setFill(Color.BLACK);
         scene.setCamera(camera);
 
         scene.setOnMousePressed(event -> {
@@ -160,7 +171,7 @@ public class Space3DViewer {
         });
 
         Stage stage = new Stage();
-        stage.setTitle("3D Latent Space Explorer - Billboarding Enabled");
+        stage.setTitle("3D Latent Space Explorer - Lit & Path Enabled");
         stage.setScene(scene);
         stage.show();
     }
@@ -169,26 +180,18 @@ public class Space3DViewer {
         Point3D yAxis = new Point3D(0, 1, 0);
         Point3D diff = target.subtract(origin);
         double height = diff.magnitude();
-
         if (height == 0) return new Cylinder(0, 0);
-
         Point3D mid = target.midpoint(origin);
         Translate moveToMidpoint = new Translate(mid.getX(), mid.getY(), mid.getZ());
-
         Point3D axisOfRotation = diff.crossProduct(yAxis);
-        if (axisOfRotation.magnitude() == 0) {
-            axisOfRotation = new Point3D(1, 0, 0);
-        }
-
+        if (axisOfRotation.magnitude() == 0) axisOfRotation = new Point3D(1, 0, 0);
         double dot = diff.normalize().dotProduct(yAxis);
         dot = Math.max(-1.0, Math.min(1.0, dot));
         double angle = Math.acos(dot);
         Rotate rotateAroundCenter = new Rotate(-Math.toDegrees(angle), axisOfRotation);
-
         Cylinder line = new Cylinder(radius, height);
         line.setMaterial(material);
         line.getTransforms().addAll(moveToMidpoint, rotateAroundCenter);
-
         return line;
     }
 }
