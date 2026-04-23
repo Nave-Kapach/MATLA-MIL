@@ -23,7 +23,7 @@ public class Main {
         bridge.runPythonPCA(inputFile);
 
         // 4. Load the processed data into our Java objects (Requirement 2.4)
-        loader.loadFromCSV(outputFile, spaceManager);
+        loader.loadFromJSON("pca_vectors.json", spaceManager);
 
         // 5. Demonstrate a Semantic Distance calculation (Requirement 3.1)
         // We use Cosine Similarity as required by the assignment

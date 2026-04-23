@@ -34,8 +34,10 @@ __pycache__/
 venv/
 *.pyc
 
-### Generated files ###
+### Generated files (Do NOT upload heavy data) ###
 output.csv
+*.json
+input.txt
 
 ### OS files ###
 .DS_Store

@@ -12,6 +12,7 @@ import javafx.scene.shape.Circle;
 import javafx.scene.shape.Line;
 import javafx.scene.text.Text;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 import org.example.command.Command;
 import org.example.command.CommandManager;
 import org.example.core.SpaceManager;
@@ -113,6 +114,8 @@ public class MainApp extends Application {
         VBox rightPanel = new VBox(10);
         rightPanel.setPadding(new Insets(10));
         rightPanel.setPrefWidth(300);
+        // רקע אטום לפאנל כדי למנוע ממילים לגלוש מתחתיו
+        rightPanel.setStyle("-fx-background-color: #f4f4f4; -fx-border-color: #cccccc; -fx-border-width: 0 0 0 1;");
 
         TabPane tabPane = new TabPane();
         Tab tabA = new Tab("Stage A: Dist & Proj");
@@ -173,10 +176,8 @@ public class MainApp extends Application {
 
     private void setupLogic() {
         spaceManager = new SpaceManager();
-        PythonBridge bridge = new PythonBridge();
         DataLoader loader = new DataLoader();
-        bridge.runPythonPCA("input.txt");
-        loader.loadFromCSV("output.csv", spaceManager);
+        loader.loadFromJSON("pca_vectors.json", spaceManager);
     }
 
     private VBox buildStageATab() {
@@ -184,7 +185,6 @@ public class MainApp extends Application {
         box.setPadding(new Insets(10));
         List<String> words = new ArrayList<>(spaceManager.getAllWords());
 
-        // 1. מרחק סמנטי
         ComboBox<String> w1Combo = new ComboBox<>(FXCollections.observableArrayList(words));
         ComboBox<String> w2Combo = new ComboBox<>(FXCollections.observableArrayList(words));
         Label distLbl = new Label("Result: ");
@@ -200,7 +200,6 @@ public class MainApp extends Application {
 
         VBox dBox = new VBox(5, new Label("1. Semantic Distance:"), w1Combo, w2Combo, distBtn, distLbl);
 
-        // 2. היטל מותאם אישית
         ComboBox<String> p1Combo = new ComboBox<>(FXCollections.observableArrayList(words));
         ComboBox<String> p2Combo = new ComboBox<>(FXCollections.observableArrayList(words));
         Button projBtn = new Button("Project onto Axis");
@@ -218,34 +217,7 @@ public class MainApp extends Application {
         return box;
     }
 
-    private void handleCalculateDistance(String w1, String w2, Label distLbl) {
-        double dist = spaceManager.getSemanticDistance(w1, w2, getCurrentMetric());
-        distLbl.setText(String.format("Result: %.4f", dist));
-
-        isProjectedMode = false;
-        renderPoints();
-        nodeMap.values().forEach(c -> { c.setFill(Color.LIGHTGRAY); c.setRadius(4); });
-        linesLayer.getChildren().clear();
-
-        Circle c1 = nodeMap.get(w1);
-        Circle c2 = nodeMap.get(w2);
-
-        if (c1 != null && c2 != null) {
-            c1.setFill(Color.GREEN);
-            c1.setRadius(7);
-            c2.setFill(Color.GREEN);
-            c2.setRadius(7);
-
-            Line distLine = new Line(c1.getCenterX(), c1.getCenterY(), c2.getCenterX(), c2.getCenterY());
-            distLine.setStroke(Color.BLUE);
-            distLine.setStrokeWidth(2);
-            distLine.getStrokeDashArray().addAll(6d, 6d);
-            linesLayer.getChildren().add(distLine);
-        }
-    }
-
     private ScrollPane buildStageBTab() {
-        // הקטנתי את הרווחים מ-15 ל-10 כדי לחסוך מקום
         VBox box = new VBox(10);
         box.setPadding(new Insets(10));
         List<String> words = new ArrayList<>(spaceManager.getAllWords());
@@ -281,8 +253,6 @@ public class MainApp extends Application {
 
         ListView<String> listView = new ListView<>(FXCollections.observableArrayList(words));
         listView.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-
-        // גודל מדויק שלא תופס את כל המסך ומשאיר מקום לטבלת המרחקים
         listView.setPrefHeight(120);
         listView.setMinHeight(120);
 
@@ -328,24 +298,74 @@ public class MainApp extends Application {
 
         box.getChildren().addAll(aBox, new Separator(), cBox);
 
-        // --- פתרון הקסם: עוטפים הכל בפס גלילה ---
         ScrollPane scrollPane = new ScrollPane(box);
-        scrollPane.setFitToWidth(true); // מתאים את הרוחב אוטומטית
+        scrollPane.setFitToWidth(true);
         scrollPane.setStyle("-fx-background-color: transparent; -fx-border-color: transparent;");
 
         return scrollPane;
+    }
+
+    private void renderPoints() {
+        nodesLayer.getChildren().clear();
+        linesLayer.getChildren().clear();
+        nodeMap.clear();
+
+        for (String word : spaceManager.getAllWords()) {
+            WordVector wv = spaceManager.getWordVector(word);
+            double[] v = wv.getVector();
+
+            double x = v[axisX] * 500 + 450;
+            double y = v[axisY] * 500 + 400;
+
+            Circle dot = new Circle(x, y, 3, Color.BLACK);
+            dot.setOnMouseClicked(e -> executeViewCommand(() -> probeNearestNeighbors(word)));
+
+            Tooltip tooltip = new Tooltip(word);
+            tooltip.setShowDelay(Duration.ZERO); // Tooltip מופיע מיד!
+            Tooltip.install(dot, tooltip);
+
+            nodeMap.put(word, dot);
+            nodesLayer.getChildren().add(dot);
+        }
+    }
+
+    private void handleCalculateDistance(String w1, String w2, Label distLbl) {
+        double dist = spaceManager.getSemanticDistance(w1, w2, getCurrentMetric());
+        distLbl.setText(String.format("Result: %.4f", dist));
+
+        isProjectedMode = false;
+        renderPoints();
+        // הצללה של הרקע בצבע GRAY כדי לשפר קונטרסט
+        nodeMap.values().forEach(c -> { c.setFill(Color.GRAY); c.setRadius(2); });
+        linesLayer.getChildren().clear();
+
+        Circle c1 = nodeMap.get(w1);
+        Circle c2 = nodeMap.get(w2);
+
+        if (c1 != null && c2 != null) {
+            c1.setFill(Color.GREEN); c1.setRadius(7);
+            c2.setFill(Color.GREEN); c2.setRadius(7);
+
+            Line distLine = new Line(c1.getCenterX(), c1.getCenterY(), c2.getCenterX(), c2.getCenterY());
+            distLine.setStroke(Color.BLUE);
+            distLine.setStrokeWidth(2.5); // עיבוי הקו
+            distLine.getStrokeDashArray().addAll(6d, 6d);
+            linesLayer.getChildren().add(distLine);
+        }
     }
 
     private void handleAnalogy(String w1, String w2, String w3) {
         if (w1 == null || w2 == null || w3 == null) return;
         isProjectedMode = false;
         renderPoints();
-        nodeMap.values().forEach(c -> { c.setFill(Color.LIGHTGRAY); c.setRadius(4); });
+        // הצללה של הרקע בצבע GRAY
+        nodeMap.values().forEach(c -> { c.setFill(Color.GRAY); c.setRadius(2); });
         linesLayer.getChildren().clear();
 
-        nodeMap.get(w1).setFill(Color.GREEN);
-        nodeMap.get(w2).setFill(Color.RED);
-        nodeMap.get(w3).setFill(Color.BLUE);
+        // הגדלת נקודות הבסיס ל-6
+        nodeMap.get(w1).setFill(Color.GREEN); nodeMap.get(w1).setRadius(6);
+        nodeMap.get(w2).setFill(Color.RED); nodeMap.get(w2).setRadius(6);
+        nodeMap.get(w3).setFill(Color.BLUE); nodeMap.get(w3).setRadius(6);
 
         double[] resultVector = spaceManager.calculateAnalogy(w1, w2, w3);
         List<SpaceManager.WordDistancePair> closest = spaceManager.findNearestNeighborsToVector(resultVector, 1, getCurrentMetric(), Arrays.asList(w1, w2, w3));
@@ -353,15 +373,20 @@ public class MainApp extends Application {
         if (!closest.isEmpty()) {
             String closestWord = closest.get(0).getWord();
             Circle cResult = nodeMap.get(closestWord);
-            if (cResult != null) { cResult.setFill(Color.GOLD); cResult.setRadius(10); }
+            // הגדלת נקודת התוצאה ל-9
+            if (cResult != null) { cResult.setFill(Color.GOLD); cResult.setRadius(9); }
             neighborsTable.setItems(FXCollections.observableArrayList(closest));
 
             Circle cW1 = nodeMap.get(w1); Circle cW2 = nodeMap.get(w2); Circle cW3 = nodeMap.get(w3);
             if (cW1 != null && cW2 != null && cW3 != null && cResult != null) {
                 Line baseRel = new Line(cW2.getCenterX(), cW2.getCenterY(), cW1.getCenterX(), cW1.getCenterY());
-                baseRel.setStroke(Color.BLACK); baseRel.getStrokeDashArray().addAll(5d, 5d);
+                baseRel.setStroke(Color.BLACK);
+                baseRel.setStrokeWidth(2.0); // עיבוי קו בסיס
+                baseRel.getStrokeDashArray().addAll(5d, 5d);
+
                 Line analogyPath = new Line(cW3.getCenterX(), cW3.getCenterY(), cResult.getCenterX(), cResult.getCenterY());
-                analogyPath.setStroke(Color.DARKRED); analogyPath.setStrokeWidth(3);
+                analogyPath.setStroke(Color.DARKRED);
+                analogyPath.setStrokeWidth(4.0); // עיבוי קו תוצאה
                 linesLayer.getChildren().addAll(baseRel, analogyPath);
             }
         }
@@ -373,23 +398,23 @@ public class MainApp extends Application {
         try {
             isProjectedMode = false;
             renderPoints();
-            nodeMap.values().forEach(c -> { c.setFill(Color.LIGHTGRAY); c.setRadius(4); });
+            // הצללה של הרקע בצבע GRAY
+            nodeMap.values().forEach(c -> { c.setFill(Color.GRAY); c.setRadius(2); });
             linesLayer.getChildren().clear();
 
             for (String w : selectedWords) {
                 Circle c = nodeMap.get(w);
-                if (c != null) { c.setFill(Color.GREEN); c.setRadius(6); }
+                if (c != null) { c.setFill(Color.GREEN); c.setRadius(5); }
             }
 
             double[] centroid = spaceManager.calculateCentroid(selectedWords);
             if (centroid == null || centroid.length < 2) return;
 
-            double cx = centroid[axisX] * 500 + 400;
+            double cx = centroid[axisX] * 500 + 450;
             double cy = centroid[axisY] * 500 + 400;
 
-            // ציור הנקודה של מרכז הכובד והוספת תווית ברורה לידה
-            Circle centroidPoint = new Circle(cx, cy, 8, Color.MAGENTA);
-            Text cLabel = new Text(cx + 10, cy, "Centroid");
+            Circle centroidPoint = new Circle(cx, cy, 6, Color.MAGENTA);
+            Text cLabel = new Text(cx + 8, cy, "Centroid");
             cLabel.setFill(Color.MAGENTA);
             cLabel.setStyle("-fx-font-weight: bold;");
             nodesLayer.getChildren().addAll(centroidPoint, cLabel);
@@ -400,38 +425,18 @@ public class MainApp extends Application {
             for (SpaceManager.WordDistancePair pair : neighbors) {
                 Circle neighborCircle = nodeMap.get(pair.getWord());
                 if (neighborCircle != null) {
-                    neighborCircle.setFill(Color.BLUE);
+                    neighborCircle.setFill(Color.BLUE); neighborCircle.setRadius(4);
                     Line line = new Line(cx, cy, neighborCircle.getCenterX(), neighborCircle.getCenterY());
                     line.setStroke(Color.MAGENTA);
-                    line.setStrokeWidth(1.5);
+                    line.setStrokeWidth(2.0); // עיבוי קו
                     linesLayer.getChildren().add(line);
                 }
             }
         } catch (Exception ex) {
-            ex.printStackTrace();
             new Alert(Alert.AlertType.ERROR, "Error calculating centroid: " + ex.getMessage()).show();
         }
     }
-    private void renderPoints() {
-        nodesLayer.getChildren().clear();
-        linesLayer.getChildren().clear();
-        nodeMap.clear();
 
-        for (String word : spaceManager.getAllWords()) {
-            WordVector wv = spaceManager.getWordVector(word);
-            double[] v = wv.getVector();
-            double x = v[axisX] * 500 + 400;
-            double y = v[axisY] * 500 + 400;
-
-            Circle dot = new Circle(x, y, 5, Color.BLACK);
-            Text label = new Text(x + 7, y, word);
-            dot.setOnMouseClicked(e -> executeViewCommand(() -> probeNearestNeighbors(word)));
-            nodeMap.put(word, dot);
-            nodesLayer.getChildren().addAll(dot, label);
-        }
-    }
-
-    // --- המתודה המעודכנת עם Collision Detection ו-Leader Lines ---
     private void renderProjectedAxis(String w1, String w2) {
         isProjectedMode = true;
         nodesLayer.getChildren().clear();
@@ -515,6 +520,11 @@ public class MainApp extends Application {
             connector.setStrokeWidth(1.0);
 
             dot.setOnMouseClicked(e -> executeViewCommand(() -> probeNearestNeighbors(word)));
+
+            Tooltip tooltip = new Tooltip(word);
+            tooltip.setShowDelay(Duration.ZERO);
+            Tooltip.install(dot, tooltip);
+
             nodeMap.put(word, dot);
             nodesLayer.getChildren().addAll(connector, dot, label);
         }
@@ -522,7 +532,8 @@ public class MainApp extends Application {
 
     private void probeNearestNeighbors(String rawTarget) {
         if (isProjectedMode) { isProjectedMode = false; renderPoints(); }
-        nodeMap.values().forEach(c -> { c.setFill(Color.BLACK); c.setRadius(5); });
+
+        nodeMap.values().forEach(c -> { c.setFill(Color.GRAY); c.setRadius(2); });
         linesLayer.getChildren().clear();
 
         String foundWord = null;
@@ -532,7 +543,7 @@ public class MainApp extends Application {
 
         if (foundWord != null) {
             Circle targetCircle = nodeMap.get(foundWord);
-            targetCircle.setFill(Color.RED); targetCircle.setRadius(8);
+            targetCircle.setFill(Color.RED); targetCircle.setRadius(6);
             drawingPane.setTranslateX(450 - targetCircle.getCenterX());
             drawingPane.setTranslateY(400 - targetCircle.getCenterY());
 
@@ -542,9 +553,11 @@ public class MainApp extends Application {
             for (SpaceManager.WordDistancePair pair : neighbors) {
                 Circle nCircle = nodeMap.get(pair.getWord());
                 if (nCircle != null) {
-                    nCircle.setFill(Color.BLUE);
+                    nCircle.setFill(Color.BLUE); nCircle.setRadius(4);
                     Line line = new Line(targetCircle.getCenterX(), targetCircle.getCenterY(), nCircle.getCenterX(), nCircle.getCenterY());
-                    line.setStroke(Color.BLACK); linesLayer.getChildren().add(line);
+                    line.setStroke(Color.BLACK);
+                    line.setStrokeWidth(1.5);
+                    linesLayer.getChildren().add(line);
                 }
             }
         } else {
