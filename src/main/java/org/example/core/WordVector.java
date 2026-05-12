@@ -1,27 +1,26 @@
 package org.example.core;
-
-// This class represents a single word and its vector of numbers
+/**
+ * המחלקה WordVector מייצגת מילה אחת ואת הווקטור המספרי שלה.
+ * כל אובייקט כזה שומר את הטקסט של המילה ואת המיקום שלה במרחב הווקטורי.
+ */
 public class WordVector {
-    private final String word;
-    private final double[] vector;
+    private final String word; // המילה עצמה
+    private final double[] vector; // הווקטור המספרי שמייצג את המילה
 
-    // Constructor to initialize word and vector
+    // בנאי שמקבל מילה ואת הווקטור שלה ושומר אותם באובייקט
     public WordVector(String word, double[] vector) {
         this.word = word;
         this.vector = vector;
     }
-
-    // Get the word text
+    // מחזיר את הטקסט של המילה
     public String getWord() {
         return word;
     }
-
-    // Get the numerical vector array
+    // מחזיר את הווקטור המספרי של המילה
     public double[] getVector() {
         return vector;
     }
-
-    // Get how many dimensions this vector has
+    // מחזיר את מספר הממדים של הווקטור
     public int getDimension() {
         return vector.length;
     }

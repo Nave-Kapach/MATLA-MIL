@@ -2,11 +2,18 @@ package org.example.app;
 
 import org.example.UI.MainApp;
 
-// This class acts as a workaround to launch JavaFX without module issues
+/**
+ * המחלקה AppLauncher משמשת כנקודת כניסה להפעלת האפליקציה.
+ * היא מפעילה את MainApp בצורה עקיפה כדי להימנע מבעיות Module של JavaFX.
+ */
 public class AppLauncher {
+
     public static void main(String[] args) {
-        // We call the MainApp from here.
-        // Since this class doesn't extend Application, Java won't check for modules.
+        /*
+         * מפעילים את האפליקציה הראשית דרך MainApp.
+         * AppLauncher עצמו לא יורש מ-Application,
+         * ולכן לפעמים זה עוזר לעקוף בעיות הרצה של JavaFX עם modules.
+         */
         MainApp.main(args);
     }
 }
