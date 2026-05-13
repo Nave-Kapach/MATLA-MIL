@@ -27,9 +27,9 @@ public class SpaceManager {
         WordVector v1 = wordMap.get(word1);
         WordVector v2 = wordMap.get(word2);
 
-        if (v1 == null || v2 == null) return -1.0; // אם אחת המילים לא קיימת, מחזירים ערך שמסמן שגיאה
+        if (v1 == null || v2 == null) return -1.0;
 
-        return metric.calculate(v1.getVector(), v2.getVector()); // החישוב עצמו מתבצע דרך DistanceMetric
+        return metric.calculate(v1.getVector(), v2.getVector());
     }
 
     // מחזיר את כל המילים שקיימות במרחב
@@ -41,114 +41,169 @@ public class SpaceManager {
     public List<WordDistancePair> findNearestNeighbors(String targetWord, int k, DistanceMetric metric) {
         WordVector target = wordMap.get(targetWord);
 
-        if (target == null) return new ArrayList<>(); // אם המילה לא קיימת, מחזירים רשימה ריקה
+        if (target == null) return new ArrayList<>();
 
-        return findNearestNeighborsToVector(
-                target.getVector(),
-                k,
-                metric,
-                Collections.singletonList(targetWord) // לא רוצים שהמילה תהיה שכן של עצמה
+        return findNearestNeighborsToVector(   target.getVector(), k,metric,   Collections.singletonList(targetWord)
+
         );
     }
 
-    //מוצא את K המילים הקרובות שיותר לווקטור מסיום רלוונטי גם למילה קיימת וגם לווקטור חדש שנוצר מחישוב כמו אנלוגיה או מרכז כובד
+    /*
+     * מוצא את k המילים הקרובות ביותר לווקטור מסוים.
+     * שימושי גם לאנלוגיה, גם ל-centroid וגם לביטוי וקטורי כללי.
+     */
     public List<WordDistancePair> findNearestNeighborsToVector(double[] targetVector, int k, DistanceMetric metric, List<String> excludeWords) {
-        List<WordDistancePair> distances = new ArrayList<>(); // רשימה של מילים והמרחק שלהן מהווקטור
+        List<WordDistancePair> distances = new ArrayList<>();
+
+        if (targetVector == null) return distances;
 
         for (WordVector wv : wordMap.values()) {
-            if (excludeWords != null && excludeWords.contains(wv.getWord())) continue; // מדלג על מילים שלא רוצים לכלול בתוצאה
+            if (excludeWords != null && excludeWords.contains(wv.getWord())) continue;
 
-            double dist = metric.calculate(targetVector, wv.getVector()); // חישוב המרחק בין הווקטור לבין המילה הנוכחית
-            distances.add(new WordDistancePair(wv.getWord(), dist)); // שמירת המילה יחד עם המרחק שלה
+            double dist = metric.calculate(targetVector, wv.getVector());
+            distances.add(new WordDistancePair(wv.getWord(), dist));
         }
 
-        distances.sort(Comparator.comparingDouble(p -> p.distance)); // מיון לפי מרחק מהקטן לגדול
+        distances.sort(Comparator.comparingDouble(p -> p.distance));
 
-        return distances.subList(0, Math.min(k, distances.size())); // מחזיר עד k שכנים קרובים
+        return distances.subList(0, Math.min(k, distances.size()));
     }
 
-    //מחשב ערך הקרנה של מילה על ציר שמוגדר על ידי שתי מילים אחרות בודקים איפה targetWord נמצא ביחס לציר שבין axisWord1 לaxisWord2
+    /*
+     * מחשב ערך הקרנה של מילה על ציר שמוגדר על ידי שתי מילים אחרות.
+     */
     public double getProjectionValue(String targetWord, String axisWord1, String axisWord2) {
         WordVector target = wordMap.get(targetWord);
         WordVector w1 = wordMap.get(axisWord1);
         WordVector w2 = wordMap.get(axisWord2);
 
-        if (target == null || w1 == null || w2 == null) return 0.0; // אם אחת המילים חסרה, אין הקרנה תקינה
+        if (target == null || w1 == null || w2 == null) return 0.0;
 
-        double[] vT = target.getVector(); // הווקטור של המילה שרוצים להקרין
-        double[] v1 = w1.getVector(); // תחילת הציר
-        double[] v2 = w2.getVector(); // סוף הציר
+        double[] vT = target.getVector();
+        double[] v1 = w1.getVector();
+        double[] v2 = w2.getVector();
 
-        double[] axis = new double[v1.length]; // וקטור הכיוון של הציר
-        double axisMagnitudeSq = 0; // אורך הציר בריבוע
+        double[] axis = new double[v1.length];
+        double axisMagnitudeSq = 0;
 
         for (int i = 0; i < axis.length; i++) {
-            axis[i] = v2[i] - v1[i]; // בניית וקטור הציר
-            axisMagnitudeSq += axis[i] * axis[i]; // חישוב האורך בריבוע
+            axis[i] = v2[i] - v1[i];
+            axisMagnitudeSq += axis[i] * axis[i];
         }
 
-        if (axisMagnitudeSq == 0) return 0.0; // אם שתי מילות הציר זהות, אין כיוון לציר
+        if (axisMagnitudeSq == 0) return 0.0;
 
         double dotProduct = 0;
 
         for (int i = 0; i < vT.length; i++) {
-            dotProduct += (vT[i] - v1[i]) * axis[i]; // מכפלה סקלרית של המילה ביחס לציר
+            dotProduct += (vT[i] - v1[i]) * axis[i];
         }
 
-        return dotProduct / Math.sqrt(axisMagnitudeSq); // ערך ההקרנה על הציר
+        return dotProduct / Math.sqrt(axisMagnitudeSq);
     }
 
-    //מחשב אנלוגיה ווקטורית בצורה V1-V2+V3
-    public double[] calculateAnalogy(String w1, String w2, String w3) {
-        WordVector v1 = wordMap.get(w1);
-        WordVector v2 = wordMap.get(w2);
-        WordVector v3 = wordMap.get(w3);
+    /*
+     * מייצג איבר אחד בביטוי וקטורי.
+     * לדוגמה:
+     * + king
+     * - man
+     */
+    public static class VectorExpressionTerm {
+        private final String word; // המילה בביטוי
+        private final int sign; // 1 עבור פלוס, -1 עבור מינוס
 
-        if (v1 == null || v2 == null || v3 == null) return null; // אם אחת המילים לא קיימת, אין תוצאה
-
-        double[] result = new double[v1.getVector().length]; // וקטור התוצאה של האנלוגיה
-
-        for (int i = 0; i < result.length; i++) {
-            result[i] = v1.getVector()[i] - v2.getVector()[i] + v3.getVector()[i]; // חישוב לפי כל ממד בנפרד
+        public VectorExpressionTerm(String word, int sign) {
+            this.word = word;
+            this.sign = sign;
         }
+
+        public String getWord() {
+            return word;
+        }
+
+        public int getSign() {
+            return sign;
+        }
+    }
+
+    /*
+     * מחשב ביטוי וקטורי כללי.
+     * לדוגמה:
+     * +king -man +woman +royal
+     *
+     * המתודה מוסיפה או מחסירה כל וקטור לפי הסימן שלו.
+     */
+    public double[] calculateVectorExpression(List<VectorExpressionTerm> terms) {
+        if (terms == null || terms.isEmpty()) return null;
+        if (wordMap.isEmpty()) return null;
+
+        int dimensions = wordMap.values().iterator().next().getVector().length;
+        double[] result = new double[dimensions];
+
+        boolean hasValidWord = false;
+
+        for (VectorExpressionTerm term : terms) {
+            if (term == null || term.getWord() == null) continue;
+
+            WordVector wordVector = wordMap.get(term.getWord());
+            if (wordVector == null) continue;
+
+            double[] vector = wordVector.getVector();
+            int sign = term.getSign() >= 0 ? 1 : -1;
+
+            for (int i = 0; i < dimensions; i++) {
+                result[i] += sign * vector[i];
+            }
+
+            hasValidWord = true;
+        }
+
+        if (!hasValidWord) return null;
 
         return result;
     }
 
-    //מחשב מרכז כובד של קבוצת מילים המרכז הוא הממוצע של כל הווקטורים שנבחרו
+    /*
+     * מחשב מרכז כובד של קבוצת מילים.
+     * המרכז הוא הממוצע של כל הווקטורים שנבחרו.
+     */
     public double[] calculateCentroid(List<String> words) {
-        if (words == null || words.isEmpty()) return null; // אין מילים לחישוב
+        if (words == null || words.isEmpty()) return null;
+        if (wordMap.isEmpty()) return null;
 
-        int dimensions = wordMap.values().iterator().next().getVector().length; // מספר הממדים של הווקטורים
-        double[] centroid = new double[dimensions]; // וקטור מרכז הכובד
+        int dimensions = wordMap.values().iterator().next().getVector().length;
+        double[] centroid = new double[dimensions];
 
-        int count = 0; // סופר כמה מילים תקינות נכנסו לחישוב
+        int count = 0;
 
         for (String word : words) {
             WordVector wv = wordMap.get(word);
 
             if (wv != null) {
                 for (int i = 0; i < dimensions; i++) {
-                    centroid[i] += wv.getVector()[i]; // סכימת הערכים בכל ממד
+                    centroid[i] += wv.getVector()[i];
                 }
 
                 count++;
             }
         }
 
-        if (count == 0) return null; // אם אף מילה לא נמצאה, אין מרכז כובד
+        if (count == 0) return null;
 
         for (int i = 0; i < dimensions; i++) {
-            centroid[i] /= count; // ממוצע חשבוני בכל ממד
+            centroid[i] /= count;
         }
 
         return centroid;
     }
 
-    //מחלקה פנימית שמייצגת זוג של מילה ומרחק משתמשים בה כדי להחזיר רשימת שכנים קרובים יחד עם המרחק שלהם
+    /**
+     * מחלקה פנימית שמייצגת זוג של מילה ומרחק.
+     * משתמשים בה כדי להחזיר שכנים קרובים עם המרחק שלהם.
+     */
     public static class WordDistancePair {
-        private final String word; // המילה שנמצאה
-        private final double distance; // המרחק שלה מהווקטור שנבדק
+        private final String word;
+        private final double distance;
 
         public WordDistancePair(String word, double distance) {
             this.word = word;

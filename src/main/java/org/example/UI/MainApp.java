@@ -2,7 +2,6 @@ package org.example.UI;
 
 import javafx.application.Application;
 import javafx.collections.FXCollections;
-import javafx.geometry.Insets;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
@@ -18,640 +17,756 @@ import org.example.command.CommandManager;
 import org.example.core.SpaceManager;
 import org.example.core.WordVector;
 import org.example.data.DataLoader;
-import org.example.integration.PythonBridge;
 import org.example.metrics.CosineSimilarity;
 import org.example.metrics.DistanceMetric;
 import org.example.metrics.EuclideanDistance;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * המחלקה MainApp היא המחלקה הראשית של ממשק המשתמש.
- * היא אחראית על בניית החלון, הצגת המילים, והפעלת פעולות כמו שכנים, מרחקים, אנלוגיות ו-3D.
+ * המחלקה הראשית של הממשק.
+ * בונה את החלון, מציגה את המרחב, ומחברת בין מחלקות ה-UI לבין SpaceManager.
  */
 public class MainApp extends Application {
-    private SpaceManager spaceManager; // מנהל את הלוגיקה של המרחב הווקטורי
-    private Pane drawingPane; // אזור הציור הראשי
-    private Pane linesLayer; // שכבה שמכילה קווים בין מילים
-    private Pane nodesLayer; // שכבה שמכילה את הנקודות של המילים
 
-    private Map<String, Circle> nodeMap = new HashMap<>(); // מחבר בין מילה לבין העיגול שלה במסך
-    private TableView<SpaceManager.WordDistancePair> neighborsTable; // טבלה להצגת שכנים ומרחקים
+    private SpaceManager spaceManager; // מנהל את המילים, הווקטורים והחישובים
+    private Pane drawingPane; // אזור הציור המרכזי
+    private Pane linesLayer; // שכבה לקווים
+    private Pane nodesLayer; // שכבה לנקודות וטקסטים
+
+    private Map<String, Circle> nodeMap = new HashMap<>(); // מילה -> העיגול שלה במסך
+    private TableView<SpaceManager.WordDistancePair> neighborsTable; // טבלת שכנים קרובים
 
     private int axisX = 0; // הממד שמוצג בציר X
     private int axisY = 1; // הממד שמוצג בציר Y
-    private boolean isProjectedMode = false; // האם אנחנו כרגע במצב הקרנה חד־ממדית
+    private boolean isProjectedMode = false; // האם כרגע מוצגת הקרנה חד־ממדית
 
-    private ComboBox<String> metricCombo; // בחירת שיטת המרחק
-    private CommandManager cmdManager = new CommandManager(); // מנהל פעולות Undo ו-Redo
+    private ComboBox<String> metricCombo; // בחירת שיטת מרחק
+    private CommandManager cmdManager = new CommandManager(); // מנהל Undo ו-Redo
     private Runnable currentViewState; // שומר את מצב התצוגה הנוכחי
 
     @Override
     public void start(Stage primaryStage) {
-        setupLogic(); // טעינת הנתונים והכנת SpaceManager
+        setupLogic(); // טעינת הנתונים מהקובץ
 
-        BorderPane root = new BorderPane(); // מבנה ראשי של החלון
-        drawingPane = new Pane(); // אזור הציור עצמו
-        linesLayer = new Pane(); // שכבת קווים
-        nodesLayer = new Pane(); // שכבת נקודות
-        drawingPane.getChildren().addAll(linesLayer, nodesLayer); // מוסיפים את שתי השכבות לציור
-        setupInteractions(); // מאפשר הזזה וזום עם העכבר
+        BorderPane root = new BorderPane(); // המבנה הראשי של החלון
 
-        currentViewState = this::renderPoints; // מצב ברירת המחדל הוא ציור כל הנקודות
+        drawingPane = new Pane(); // יצירת אזור הציור
+        linesLayer = new Pane(); // יצירת שכבת קווים
+        nodesLayer = new Pane(); // יצירת שכבת נקודות
 
-        // --- תפריט עליון ---
+        drawingPane.getChildren().addAll(linesLayer, nodesLayer); // מוסיף קווים מתחת לנקודות
+        CanvasInteractionHelper.enablePanAndZoom(drawingPane); // מוסיף גרירה וזום לאזור הציור
+
+        currentViewState = this::renderPoints; // מצב התצוגה הראשוני
+
         TextField searchField = new TextField(); // שדה לחיפוש מילה
-        searchField.setPromptText("Search word...");
+        searchField.setPromptText("Search word..."); // טקסט ברירת מחדל בשדה החיפוש
+
         Button searchBtn = new Button("Search"); // כפתור חיפוש
 
-        ComboBox<Integer> xAxisCombo = createAxisCombo(0); // בחירת ממד לציר X
-        ComboBox<Integer> yAxisCombo = createAxisCombo(1); // בחירת ממד לציר Y
-
         metricCombo = new ComboBox<>(); // בחירת מדד מרחק
-        metricCombo.getItems().addAll("Cosine Similarity", "Euclidean Distance");
-        metricCombo.setValue("Cosine Similarity");
+        metricCombo.getItems().addAll("Cosine Similarity", "Euclidean Distance"); // אפשרויות המרחק
+        metricCombo.setValue("Cosine Similarity"); // ברירת מחדל
 
         searchBtn.setOnAction(e -> {
-            String target = searchField.getText().trim(); // מקבל את המילה שהמשתמש כתב
-            executeViewCommand(() -> probeNearestNeighbors(target)); // מציג שכנים קרובים למילה
+            String target = searchField.getText().trim(); // המילה שהמשתמש כתב
+            executeViewCommand(() -> probeNearestNeighbors(target)); // חיפוש שכנים דרך Command
         });
 
-        /*
-         * עדכון הצירים לפי הבחירה של המשתמש.
-         * במקום 3 אפשרויות קבועות, המשתמש יכול לבחור כל ממד שקיים בווקטור.
-         */
-        Runnable updateAxes = () -> {
-            if (xAxisCombo.getValue() == null || yAxisCombo.getValue() == null) return;
+        AxisSelectorPanel axisSelectorPanel = new AxisSelectorPanel(
+                getVectorDimension(), // מספר הממדים שיש בווקטור
+                0, // ברירת מחדל לציר X
+                1, // ברירת מחדל לציר Y
+                (x, y) -> { // מה קורה כשהמשתמש משנה צירים
+                    axisX = x; // עדכון ציר X
+                    axisY = y; // עדכון ציר Y
 
-            if (xAxisCombo.getValue().equals(yAxisCombo.getValue())) {
-                new Alert(Alert.AlertType.WARNING, "Please choose different dimensions for X and Y.").show();
-                return;
-            }
+                    if (!isProjectedMode) { // אם לא במצב הקרנה
+                        renderPoints(); // מצייר מחדש לפי הצירים החדשים
+                    }
+                }
+        );
 
-            axisX = xAxisCombo.getValue(); // הממד שיוצג בציר X
-            axisY = yAxisCombo.getValue(); // הממד שיוצג בציר Y
-
-            if (!isProjectedMode) renderPoints(); // מצייר מחדש לפי הממדים החדשים
-        };
-
-        xAxisCombo.setOnAction(e -> updateAxes.run());
-        yAxisCombo.setOnAction(e -> updateAxes.run());
-
-        Button resetBtn = new Button("Reset View");
+        Button resetBtn = new Button("Reset View"); // כפתור איפוס תצוגה
         resetBtn.setOnAction(e -> {
             executeViewCommand(() -> {
-                isProjectedMode = false; // חוזרים ממצב הקרנה לתצוגה רגילה
-                renderPoints();
+                isProjectedMode = false; // יציאה ממצב הקרנה
+                renderPoints(); // ציור מחדש של המרחב
             });
         });
 
-        Button undoBtn = new Button("Undo");
-        Button redoBtn = new Button("Redo");
-        undoBtn.setStyle("-fx-background-color: #ff9800; -fx-text-fill: white;");
-        redoBtn.setStyle("-fx-background-color: #2196f3; -fx-text-fill: white;");
+        Button undoBtn = new Button("Undo"); // כפתור ביטול פעולה
+        Button redoBtn = new Button("Redo"); // כפתור ביצוע מחדש
 
-        undoBtn.setOnAction(e -> cmdManager.undo()); // ביטול פעולה אחרונה
-        redoBtn.setOnAction(e -> cmdManager.redo()); // ביצוע מחדש של פעולה שבוטלה
+        undoBtn.setStyle("-fx-background-color: #ff9800; -fx-text-fill: white;"); // עיצוב Undo
+        redoBtn.setStyle("-fx-background-color: #2196f3; -fx-text-fill: white;"); // עיצוב Redo
 
-        Button btn3D = new Button("Open 3D View");
+        undoBtn.setOnAction(e -> cmdManager.undo()); // מפעיל Undo
+        redoBtn.setOnAction(e -> cmdManager.redo()); // מפעיל Redo
+
+        Button btn3D = new Button("Open 3D View"); // כפתור לפתיחת תצוגת 3D
         btn3D.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-weight: bold;");
         btn3D.setOnAction(e -> {
-            Space3DViewer viewer3D = new Space3DViewer(); // יוצר חלון 3D חדש
-            viewer3D.show(spaceManager); // מציג את המרחב בתלת־ממד
+            Space3DViewer viewer3D = new Space3DViewer(); // יצירת תצוגת 3D
+            viewer3D.show(spaceManager); // פתיחת חלון 3D
         });
 
-        HBox topMenu = new HBox(10, new Label("Find:"), searchField, searchBtn,
-                new Label("X Dim:"), xAxisCombo,
-                new Label("Y Dim:"), yAxisCombo,
+        HBox topMenu = new HBox(10,
+                new Label("Find:"), searchField, searchBtn,
+                axisSelectorPanel,
                 new Label("Metric:"), metricCombo,
-                resetBtn, undoBtn, redoBtn, btn3D);
+                resetBtn, undoBtn, redoBtn, btn3D
+        ); // תפריט עליון
+
         topMenu.setStyle("-fx-padding: 10; -fx-background-color: #f4f4f4; -fx-border-color: #cccccc;");
 
-        // --- פאנל ימני (טאבים) ---
-        VBox rightPanel = new VBox(10);
-        rightPanel.setPadding(new Insets(10));
-        rightPanel.setPrefWidth(300);
-        rightPanel.setStyle("-fx-background-color: #f4f4f4; -fx-border-color: #cccccc; -fx-border-width: 0 0 0 1;"); // רקע אטום לפאנל הימני
+        VBox rightPanel = new VBox(10); // פאנל ימני
+        rightPanel.setPadding(new javafx.geometry.Insets(10)); // רווח פנימי
+        rightPanel.setPrefWidth(300); // רוחב הפאנל
+        rightPanel.setStyle("-fx-background-color: #f4f4f4; -fx-border-color: #cccccc; -fx-border-width: 0 0 0 1;");
 
         TabPane tabPane = new TabPane(); // אזור טאבים
 
-        Tab tabA = new Tab("Stage A: Dist & Proj"); // טאב של מרחק והקרנה
-        tabA.setClosable(false);
-        tabA.setContent(buildStageATab());
+        Tab tabA = new Tab("Stage A: Dist & Proj"); // טאב שלב א
+        tabA.setClosable(false); // אי אפשר לסגור את הטאב
+        tabA.setContent(buildStageATab()); // תוכן שלב א
 
-        Tab tabB = new Tab("Stage B: Vector Lab"); // טאב של אנלוגיות ומרכז כובד
-        tabB.setClosable(false);
-        tabB.setContent(buildStageBTab());
+        Tab tabB = new Tab("Stage B: Vector Lab"); // טאב שלב ב
+        tabB.setClosable(false); // אי אפשר לסגור את הטאב
+        tabB.setContent(buildStageBTab()); // תוכן שלב ב
 
-        tabPane.getTabs().addAll(tabA, tabB);
+        tabPane.getTabs().addAll(tabA, tabB); // הוספת הטאבים לפאנל
 
-        neighborsTable = new TableView<>(); // טבלה להצגת שכנים קרובים
-        TableColumn<SpaceManager.WordDistancePair, String> wCol = new TableColumn<>("Word"); // עמודת מילים
-        wCol.setCellValueFactory(new PropertyValueFactory<>("word"));
-        TableColumn<SpaceManager.WordDistancePair, Double> dCol = new TableColumn<>("Distance"); // עמודת מרחקים
-        dCol.setCellValueFactory(new PropertyValueFactory<>("distance"));
-        neighborsTable.getColumns().addAll(wCol, dCol);
-        VBox.setVgrow(neighborsTable, Priority.ALWAYS);
+        neighborsTable = new TableView<>(); // טבלת שכנים
 
-        rightPanel.getChildren().addAll(tabPane, new Label("Nearest Neighbors:"), neighborsTable);
+        TableColumn<SpaceManager.WordDistancePair, String> wCol = new TableColumn<>("Word"); // עמודת מילה
+        wCol.setCellValueFactory(new PropertyValueFactory<>("word")); // קישור לשדה word
 
-        root.setTop(topMenu); // תפריט עליון
-        root.setCenter(drawingPane); // אזור ציור במרכז
+        TableColumn<SpaceManager.WordDistancePair, Double> dCol = new TableColumn<>("Distance"); // עמודת מרחק
+        dCol.setCellValueFactory(new PropertyValueFactory<>("distance")); // קישור לשדה distance
+
+        neighborsTable.getColumns().addAll(wCol, dCol); // הוספת עמודות לטבלה
+        VBox.setVgrow(neighborsTable, Priority.ALWAYS); // הטבלה גדלה לפי המקום
+
+        rightPanel.getChildren().addAll(tabPane, new Label("Nearest Neighbors:"), neighborsTable); // הוספת טאבים וטבלה לפאנל
+
+        root.setTop(topMenu); // תפריט למעלה
+        root.setCenter(drawingPane); // ציור במרכז
         root.setRight(rightPanel); // פאנל ימני
-        drawingPane.toBack();
-        renderPoints(); // ציור ראשוני של כל הנקודות
 
-        Scene scene = new Scene(root, 1200, 800);
-        primaryStage.setTitle("Latent Space Explorer - Final Version");
-        primaryStage.setScene(scene);
-        primaryStage.show();
+        drawingPane.toBack(); // מוודא שהציור לא מסתיר רכיבי UI
+
+        renderPoints(); // ציור ראשוני של המילים
+
+        Scene scene = new Scene(root, 1200, 800); // יצירת סצנה
+
+        primaryStage.setTitle("Latent Space Explorer - Final Version"); // כותרת החלון
+        primaryStage.setScene(scene); // חיבור הסצנה לחלון
+        primaryStage.show(); // הצגת החלון
     }
 
-    // בחירת שיטת מרחק
+    // מחזיר את שיטת המרחק שהמשתמש בחר
     private DistanceMetric getCurrentMetric() {
-        if ("Euclidean Distance".equals(metricCombo.getValue())) {
-            return new EuclideanDistance();
+        if ("Euclidean Distance".equals(metricCombo.getValue())) { // אם המשתמש בחר Euclidean
+            return new EuclideanDistance(); // מחזיר מדד אוקלידי
         }
-        return new CosineSimilarity();
+
+        return new CosineSimilarity(); // אחרת מחזיר Cosine
     }
 
-    /*
-     * עוטף שינויי תצוגה בתור Command כדי לתמוך ב-Undo ו-Redo.
-     */
+    // עוטף שינוי תצוגה בתוך Command כדי לאפשר Undo ו-Redo
     private void executeViewCommand(Runnable newViewState) {
-        Runnable oldViewState = this.currentViewState; // שומר את מצב התצוגה הקודם
-        Command cmd = new Command() {
+        Runnable oldViewState = this.currentViewState; // שומר את התצוגה הקודמת
+
+        Command cmd = new Command() { // יצירת פעולה חדשה
             @Override
             public void execute() {
-                currentViewState = newViewState;
-                newViewState.run();
+                currentViewState = newViewState; // עדכון מצב נוכחי
+                newViewState.run(); // ביצוע התצוגה החדשה
             }
 
             @Override
             public void undo() {
-                currentViewState = oldViewState;
-                oldViewState.run();
+                currentViewState = oldViewState; // החזרת מצב קודם
+                oldViewState.run(); // הרצת התצוגה הקודמת
             }
         };
-        cmdManager.executeCommand(cmd);
+
+        cmdManager.executeCommand(cmd); // שליחת הפעולה למנהל ה-Command
     }
 
-    // אתחול לוגיקה וטעינת ווקטורים מהקובץ
+    // טוען את קובץ הווקטורים לתוך SpaceManager
     private void setupLogic() {
-        spaceManager = new SpaceManager();
-        DataLoader loader = new DataLoader();
-        loader.loadFromJSON("pca_vectors.json", spaceManager);
+        spaceManager = new SpaceManager(); // יצירת מנהל מרחב
+
+        DataLoader loader = new DataLoader(); // יצירת טוען נתונים
+        loader.loadFromJSON("pca_vectors.json", spaceManager); // טעינת הווקטורים מהקובץ
     }
 
-    // בונה את הטאב הראשון חישוב מרחק והקרנה על ציר
+    // בונה את טאב שלב א באמצעות מחלקה חיצונית
+    // בונה את טאב שלב א באמצעות מחלקה חיצונית
     private VBox buildStageATab() {
-        VBox box = new VBox(15);
-        box.setPadding(new Insets(10));
-        List<String> words = new ArrayList<>(spaceManager.getAllWords()); // כל המילים הקיימות במרחב
-
-        ComboBox<String> w1Combo = new ComboBox<>(FXCollections.observableArrayList(words)); // מילה ראשונה למרחק
-        ComboBox<String> w2Combo = new ComboBox<>(FXCollections.observableArrayList(words)); // מילה שנייה למרחק
-        Label distLbl = new Label("Result: "); // תווית להצגת תוצאת המרחק
-        Button distBtn = new Button("Calc Distance"); // כפתור חישוב מרחק
-
-        distBtn.setOnAction(e -> {
-            String w1 = w1Combo.getValue();
-            String w2 = w2Combo.getValue();
-            if (w1 != null && w2 != null) {
-                executeViewCommand(() -> handleCalculateDistance(w1, w2, distLbl));
-            }
-        });
-
-        VBox dBox = new VBox(5, new Label("1. Semantic Distance:"), w1Combo, w2Combo, distBtn, distLbl);
-
-        ComboBox<String> p1Combo = new ComboBox<>(FXCollections.observableArrayList(words)); // נקודה ראשונה לציר הקרנה
-        ComboBox<String> p2Combo = new ComboBox<>(FXCollections.observableArrayList(words)); // נקודה שנייה לציר הקרנה
-        Button projBtn = new Button("Project onto Axis"); // כפתור הקרנה
-
-        projBtn.setOnAction(e -> {
-            String p1 = p1Combo.getValue();
-            String p2 = p2Combo.getValue();
-            if (p1 != null && p2 != null) {
-                executeViewCommand(() -> renderProjectedAxis(p1, p2));
-            }
-        });
-
-        VBox pBox = new VBox(5, new Label("2. Custom Projection (1D):"), p1Combo, p2Combo, projBtn);
-        box.getChildren().addAll(dBox, new Separator(), pBox);
-        return box;
-    }
-
-    // בונה את הטאב השני לאנלוגיה מרכז כובד ותצוגה ב-3D
-    private ScrollPane buildStageBTab() {
-        VBox box = new VBox(10);
-        box.setPadding(new Insets(10));
         List<String> words = new ArrayList<>(spaceManager.getAllWords());
 
-        ComboBox<String> v1Combo = new ComboBox<>(FXCollections.observableArrayList(words)); // V1 באנלוגיה
-        ComboBox<String> v2Combo = new ComboBox<>(FXCollections.observableArrayList(words)); // V2 באנלוגיה
-        ComboBox<String> v3Combo = new ComboBox<>(FXCollections.observableArrayList(words)); // V3 באנלוגיה
-        Button runAnalogyBtn = new Button("Run Analogy (2D)"); // הצגת אנלוגיה ב-2D
-        Button runAnalogy3DBtn = new Button("View in 3D"); // הצגת אנלוגיה ב-3D
-
-        runAnalogyBtn.setOnAction(e -> {
-            String w1 = v1Combo.getValue();
-            String w2 = v2Combo.getValue();
-            String w3 = v3Combo.getValue();
-            executeViewCommand(() -> handleAnalogy(w1, w2, w3));
-        });
-
-        runAnalogy3DBtn.setOnAction(e -> {
-            if (v1Combo.getValue() != null && v2Combo.getValue() != null && v3Combo.getValue() != null) {
-                double[] resultVector = spaceManager.calculateAnalogy(v1Combo.getValue(), v2Combo.getValue(), v3Combo.getValue()); // חישוב V1 - V2 + V3
-                List<SpaceManager.WordDistancePair> closest = spaceManager.findNearestNeighborsToVector(
-                        resultVector, 1, getCurrentMetric(), Arrays.asList(v1Combo.getValue(), v2Combo.getValue(), v3Combo.getValue())); // מציאת המילה הקרובה לתוצאה
-                String closestWord = closest.isEmpty() ? null : closest.get(0).getWord();
-                new Space3DViewer().showAnalogy(spaceManager, v1Combo.getValue(), v2Combo.getValue(), v3Combo.getValue(), closestWord);
-            }
-        });
-
-        VBox aBox = new VBox(5, new Label("1. Analogy (V1 - V2 + V3):"),
-                new HBox(5, new Label("V1:"), v1Combo),
-                new HBox(5, new Label("- V2:"), v2Combo),
-                new HBox(5, new Label("+ V3:"), v3Combo),
-                new HBox(5, runAnalogyBtn, runAnalogy3DBtn));
-
-        ListView<String> listView = new ListView<>(FXCollections.observableArrayList(words)); // רשימה לבחירת כמה מילים
-        listView.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-        listView.setPrefHeight(120);
-        listView.setMinHeight(120);
-
-        Spinner<Integer> kSpinner = new Spinner<>(1, 20, 5); // בחירת כמות שכנים
-        Button centroidBtn = new Button("Find Centroid (2D)"); // מרכז כובד ב-2D
-        Button centroid3DBtn = new Button("View in 3D"); // מרכז כובד ב-3D
-
-        final List<String> activeCentroidGroup = new ArrayList<>(); // שומר את קבוצת המילים הפעילה
-
-        centroidBtn.setOnAction(e -> {
-            List<String> selected = new ArrayList<>(listView.getSelectionModel().getSelectedItems());
-            if (selected.isEmpty()) {
-                new Alert(Alert.AlertType.WARNING, "Please select at least one word! (Use Ctrl+Click)").show();
-                return;
-            }
-            activeCentroidGroup.clear();
-            activeCentroidGroup.addAll(selected);
-            int k = kSpinner.getValue();
-            executeViewCommand(() -> handleCentroid(activeCentroidGroup, k));
-        });
-
-        kSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
-            if (!activeCentroidGroup.isEmpty()) {
-                executeViewCommand(() -> handleCentroid(activeCentroidGroup, newVal)); // מעדכן שכנים אם K השתנה
-            }
-        });
-
-        centroid3DBtn.setOnAction(e -> {
-            List<String> targetWords = activeCentroidGroup.isEmpty() ?
-                    new ArrayList<>(listView.getSelectionModel().getSelectedItems()) : activeCentroidGroup;
-            if (!targetWords.isEmpty()) {
-                double[] centroid = spaceManager.calculateCentroid(targetWords); // חישוב מרכז הכובד
-                List<SpaceManager.WordDistancePair> neighbors = spaceManager.findNearestNeighborsToVector(centroid, kSpinner.getValue(), getCurrentMetric(), null);
-                new Space3DViewer().showCentroid(spaceManager, targetWords, neighbors, centroid);
-            } else {
-                new Alert(Alert.AlertType.WARNING, "Please select words and find Centroid first!").show();
-            }
-        });
-
-        VBox cBox = new VBox(5, new Label("2. Subspace Grouping:"), new Label("Select multiple words (Ctrl+Click):"), listView,
-                new HBox(5, new Label("K Size:"), kSpinner),
-                new HBox(5, centroidBtn, centroid3DBtn));
-
-        box.getChildren().addAll(aBox, new Separator(), cBox);
-
-        ScrollPane scrollPane = new ScrollPane(box);
-        scrollPane.setFitToWidth(true);
-        scrollPane.setStyle("-fx-background-color: transparent; -fx-border-color: transparent;");
-
-        return scrollPane;
+        return new StageATabPanel(
+                words,
+                (w1, w2, resultLabel) ->
+                        executeViewCommand(() -> handleCalculateDistance(w1, w2, resultLabel)),
+                this::handleDistance3D,
+                (p1, p2) ->
+                        executeViewCommand(() -> renderProjectedAxis(p1, p2))
+        );
     }
 
-    // ציור של כל המילים כנקודות במרחב דו מימדי
+    // בונה את טאב שלב ב באמצעות VectorExpressionPanel ו-CentroidPanel
+    private ScrollPane buildStageBTab() {
+        VBox box = new VBox(10); // קופסה אנכית לתוכן שלב ב
+        box.setPadding(new javafx.geometry.Insets(10)); // רווח פנימי
+
+        List<String> words = new ArrayList<>(spaceManager.getAllWords()); // כל המילים במרחב
+
+        VectorExpressionPanel vectorExpressionPanel = new VectorExpressionPanel(
+                words,
+                terms -> executeViewCommand(() -> handleVectorExpression(terms)),
+                this::handleVectorExpression3D
+        );
+
+        CentroidPanel centroidPanel = new CentroidPanel(
+                words,
+                (selectedWords, k) -> executeViewCommand(() -> handleCentroid(selectedWords, k)), // Centroid ב-2D
+                (targetWords, k) -> { // Centroid ב-3D
+                    double[] centroid = spaceManager.calculateCentroid(targetWords); // חישוב מרכז כובד
+
+                    if (centroid == null) { // אם החישוב נכשל
+                        new Alert(Alert.AlertType.WARNING, "Could not calculate centroid.").show();
+                        return;
+                    }
+
+                    List<SpaceManager.WordDistancePair> neighbors =
+                            spaceManager.findNearestNeighborsToVector(
+                                    centroid,
+                                    k,
+                                    getCurrentMetric(),
+                                    null
+                            ); // מציאת שכנים קרובים ל-centroid
+
+                    new Space3DViewer().showCentroid(spaceManager, targetWords, neighbors, centroid); // הצגת centroid ב-3D
+                }
+        );
+
+        box.getChildren().addAll(vectorExpressionPanel, new Separator(), centroidPanel); // הוספת שני הפאנלים
+
+        ScrollPane scrollPane = new ScrollPane(box); // עטיפה בגלילה
+        scrollPane.setFitToWidth(true); // התאמה לרוחב
+        scrollPane.setStyle("-fx-background-color: transparent; -fx-border-color: transparent;"); // עיצוב נקי
+
+        return scrollPane; // מחזיר את טאב שלב ב
+    }
+
+    // מצייר את כל המילים כנקודות במרחב הדו־ממדי
     private void renderPoints() {
-        nodesLayer.getChildren().clear(); // מנקה נקודות קודמות
-        linesLayer.getChildren().clear(); // מנקה קווים קודמים
-        nodeMap.clear(); // מאפס את הקישור בין מילים לעיגולים
+        nodesLayer.getChildren().clear(); // ניקוי נקודות קודמות
+        linesLayer.getChildren().clear(); // ניקוי קווים קודמים
+        nodeMap.clear(); // ניקוי מיפוי מילה -> נקודה
 
-        for (String word : spaceManager.getAllWords()) {
-            WordVector wv = spaceManager.getWordVector(word);
-            double[] v = wv.getVector();
+        for (String word : spaceManager.getAllWords()) { // מעבר על כל המילים
+            WordVector wv = spaceManager.getWordVector(word); // קבלת הווקטור של המילה
+            double[] v = wv.getVector(); // מערך הערכים של הווקטור
 
-            double x = v[axisX] * 500 + 450; // חישוב מיקום X לפי הממד שנבחר
-            double y = v[axisY] * 500 + 400; // חישוב מיקום Y לפי הממד שנבחר
+            double x = v[axisX] * 500 + 450; // חישוב מיקום X לפי הממד הנבחר
+            double y = v[axisY] * 500 + 400; // חישוב מיקום Y לפי הממד הנבחר
 
-            Circle dot = new Circle(x, y, 3, Color.BLACK); // עיגול שמייצג מילה
+            Circle dot = new Circle(x, y, 3, Color.BLACK); // יצירת נקודה למילה
+
             dot.setOnMouseClicked(e -> executeViewCommand(() -> probeNearestNeighbors(word))); // לחיצה מציגה שכנים
 
-            Tooltip tooltip = new Tooltip(word); // הצגת שם המילה במעבר עכבר
-            tooltip.setShowDelay(Duration.ZERO); // מציג מיד
-            Tooltip.install(dot, tooltip);
+            Tooltip tooltip = new Tooltip(word); // Tooltip לשם המילה
+            tooltip.setShowDelay(Duration.ZERO); // הופעה מיידית
+            Tooltip.install(dot, tooltip); // חיבור Tooltip לנקודה
 
-            nodeMap.put(word, dot); // שומר את העיגול לפי המילה
-            nodesLayer.getChildren().add(dot); // מוסיף את הנקודה למסך
+            nodeMap.put(word, dot); // שמירת הנקודה לפי שם המילה
+            nodesLayer.getChildren().add(dot); // הוספת הנקודה למסך
         }
     }
 
-    // מחשב מרחק בין 2 מילים ומסמן אותן במסך
+    // מחשב מרחק בין שתי מילים ומסמן אותן במסך
     private void handleCalculateDistance(String w1, String w2, Label distLbl) {
-        double dist = spaceManager.getSemanticDistance(w1, w2, getCurrentMetric()); // חישוב המרחק
-        distLbl.setText(String.format("Result: %.4f", dist));
+        double dist = spaceManager.getSemanticDistance(w1, w2, getCurrentMetric()); // חישוב מרחק
+        distLbl.setText(String.format("Result: %.4f", dist)); // הצגת התוצאה
 
-        isProjectedMode = false;
-        renderPoints();
-        nodeMap.values().forEach(c -> { c.setFill(Color.GRAY); c.setRadius(2); }); // מאפיר את הרקע
-        linesLayer.getChildren().clear();
+        isProjectedMode = false; // יציאה ממצב הקרנה
+        renderPoints(); // ציור מחדש
 
-        Circle c1 = nodeMap.get(w1);
-        Circle c2 = nodeMap.get(w2);
+        nodeMap.values().forEach(c -> {
+            c.setFill(Color.GRAY); // מאפיר נקודות רקע
+            c.setRadius(2); // מקטין נקודות רקע
+        });
 
-        if (c1 != null && c2 != null) {
-            c1.setFill(Color.GREEN); c1.setRadius(7); // סימון מילה ראשונה
-            c2.setFill(Color.GREEN); c2.setRadius(7); // סימון מילה שנייה
+        linesLayer.getChildren().clear(); // ניקוי קווים קודמים
 
-            Line distLine = new Line(c1.getCenterX(), c1.getCenterY(), c2.getCenterX(), c2.getCenterY()); // קו בין המילים
-            distLine.setStroke(Color.BLUE);
-            distLine.setStrokeWidth(2.5);
-            distLine.getStrokeDashArray().addAll(6d, 6d);
-            linesLayer.getChildren().add(distLine);
+        Circle c1 = nodeMap.get(w1); // נקודת המילה הראשונה
+        Circle c2 = nodeMap.get(w2); // נקודת המילה השנייה
+
+        if (c1 != null && c2 != null) { // אם שתי המילים קיימות במסך
+            c1.setFill(Color.GREEN); // סימון מילה ראשונה
+            c1.setRadius(7); // הגדלת מילה ראשונה
+
+            c2.setFill(Color.GREEN); // סימון מילה שנייה
+            c2.setRadius(7); // הגדלת מילה שנייה
+
+            Line distLine = new Line(
+                    c1.getCenterX(),
+                    c1.getCenterY(),
+                    c2.getCenterX(),
+                    c2.getCenterY()
+            ); // קו בין שתי המילים
+
+            distLine.setStroke(Color.BLUE); // צבע הקו
+            distLine.setStrokeWidth(2.5); // עובי הקו
+            distLine.getStrokeDashArray().addAll(6d, 6d); // קו מקווקו
+
+            linesLayer.getChildren().add(distLine); // הוספת הקו למסך
         }
     }
+    // מציג מרחק בין שתי מילים ב-3D
+    private void handleDistance3D(String w1, String w2) {
+        if (w1 == null || w2 == null) return;
 
-    // מבצע אנלוגיה ווקטורית W1-W2+W3
-    private void handleAnalogy(String w1, String w2, String w3) {
-        if (w1 == null || w2 == null || w3 == null) return;
-        isProjectedMode = false;
-        renderPoints();
-        nodeMap.values().forEach(c -> { c.setFill(Color.GRAY); c.setRadius(2); }); // מאפיר רקע כדי להבליט אנלוגיה
-        linesLayer.getChildren().clear();
+        WordVector wordVector1 = spaceManager.getWordVector(w1);
+        WordVector wordVector2 = spaceManager.getWordVector(w2);
 
-        nodeMap.get(w1).setFill(Color.GREEN); nodeMap.get(w1).setRadius(6); // סימון V1
-        nodeMap.get(w2).setFill(Color.RED); nodeMap.get(w2).setRadius(6); // סימון V2
-        nodeMap.get(w3).setFill(Color.BLUE); nodeMap.get(w3).setRadius(6); // סימון V3
+        if (wordVector1 == null || wordVector2 == null) {
+            new Alert(Alert.AlertType.WARNING, "One of the words was not found.").show();
+            return;
+        }
 
-        double[] resultVector = spaceManager.calculateAnalogy(w1, w2, w3); // חישוב וקטור האנלוגיה
-        List<SpaceManager.WordDistancePair> closest = spaceManager.findNearestNeighborsToVector(resultVector, 1, getCurrentMetric(), Arrays.asList(w1, w2, w3)); // מציאת התוצאה הקרובה ביותר
+        double distance = spaceManager.getSemanticDistance(w1, w2, getCurrentMetric()); // חישוב במרחב המלא
 
-        if (!closest.isEmpty()) {
-            String closestWord = closest.get(0).getWord(); // המילה הקרובה ביותר לווקטור התוצאה
-            Circle cResult = nodeMap.get(closestWord);
-            if (cResult != null) { cResult.setFill(Color.GOLD); cResult.setRadius(9); } // סימון התוצאה
-            neighborsTable.setItems(FXCollections.observableArrayList(closest));
+        new Space3DViewer().showDistance(spaceManager, w1, w2, distance); // הצגה ב-3D
+    }
+    // מחשב ביטוי וקטורי כללי ומציג את התוצאה
+    private void handleVectorExpression(List<SpaceManager.VectorExpressionTerm> terms) {
+        if (terms == null || terms.isEmpty()) { // אם אין איברים בביטוי
+            new Alert(Alert.AlertType.WARNING, "Please add at least one word to the expression.").show();
+            return;
+        }
 
-            Circle cW1 = nodeMap.get(w1); Circle cW2 = nodeMap.get(w2); Circle cW3 = nodeMap.get(w3);
-            if (cW1 != null && cW2 != null && cW3 != null && cResult != null) {
-                Line baseRel = new Line(cW2.getCenterX(), cW2.getCenterY(), cW1.getCenterX(), cW1.getCenterY()); // קו היחס המקורי
-                baseRel.setStroke(Color.BLACK);
-                baseRel.setStrokeWidth(2.0);
-                baseRel.getStrokeDashArray().addAll(5d, 5d);
+        isProjectedMode = false; // יציאה ממצב הקרנה
+        renderPoints(); // ציור מחדש
 
-                Line analogyPath = new Line(cW3.getCenterX(), cW3.getCenterY(), cResult.getCenterX(), cResult.getCenterY()); // קו אל תוצאת האנלוגיה
-                analogyPath.setStroke(Color.DARKRED);
-                analogyPath.setStrokeWidth(4.0);
-                linesLayer.getChildren().addAll(baseRel, analogyPath);
+        nodeMap.values().forEach(c -> {
+            c.setFill(Color.GRAY); // מאפיר רקע
+            c.setRadius(2); // מקטין נקודות רקע
+        });
+
+        linesLayer.getChildren().clear(); // ניקוי קווים
+
+        List<String> excludeWords = new ArrayList<>(); // מילים שלא נרצה להחזיר כתוצאה
+
+        for (SpaceManager.VectorExpressionTerm term : terms) { // מעבר על איברי הביטוי
+            String word = term.getWord(); // המילה באיבר
+            excludeWords.add(word); // לא להחזיר אותה כתוצאה קרובה
+
+            Circle circle = nodeMap.get(word); // הנקודה של המילה
+
+            if (circle != null) { // אם המילה קיימת במסך
+                Color color = term.getSign() >= 0 ? Color.GREEN : Color.RED; // פלוס ירוק, מינוס אדום
+                String signText = term.getSign() >= 0 ? "+" : "-"; // סימן להצגה
+
+                circle.setFill(color); // צביעת המילה
+                circle.setRadius(7); // הגדלת המילה
+
+                Text label = new Text(
+                        circle.getCenterX() + 8,
+                        circle.getCenterY() - 8,
+                        signText + " " + word
+                ); // טקסט ליד המילה
+
+                label.setFill(color); // צבע הטקסט לפי הפעולה
+                label.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;"); // עיצוב הטקסט
+
+                nodesLayer.getChildren().add(label); // הוספת הטקסט למסך
             }
         }
+
+        double[] resultVector = spaceManager.calculateVectorExpression(terms); // חישוב הביטוי הווקטורי
+
+        if (resultVector == null) { // אם החישוב נכשל
+            new Alert(Alert.AlertType.WARNING, "Could not calculate vector expression.").show();
+            return;
+        }
+
+        List<SpaceManager.WordDistancePair> closest =
+                spaceManager.findNearestNeighborsToVector(
+                        resultVector,
+                        1,
+                        getCurrentMetric(),
+                        excludeWords
+                ); // מציאת המילה הכי קרובה לתוצאה
+
+        neighborsTable.setItems(FXCollections.observableArrayList(closest)); // הצגת התוצאה בטבלה
+
+        Circle resultCircle = null; // העיגול של המילה הקרובה ביותר
+
+        if (!closest.isEmpty()) { // אם נמצאה תוצאה
+            String closestWord = closest.get(0).getWord(); // שם המילה הקרובה
+            resultCircle = nodeMap.get(closestWord); // העיגול שלה במסך
+
+            if (resultCircle != null) { // אם היא קיימת במסך
+                resultCircle.setFill(Color.GOLD); // סימון בזהב
+                resultCircle.setRadius(10); // הגדלה
+
+                Text resultLabel = new Text(
+                        resultCircle.getCenterX() + 10,
+                        resultCircle.getCenterY() - 10,
+                        "RESULT: " + closestWord
+                ); // טקסט תוצאה
+
+                resultLabel.setFill(Color.GOLD); // צבע זהב
+                resultLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14px;"); // עיצוב תוצאה
+
+                nodesLayer.getChildren().add(resultLabel); // הוספת טקסט תוצאה
+            }
+        }
+
+        double currentX = 450; // נקודת התחלה למסלול הווקטורי בציר X
+        double currentY = 400; // נקודת התחלה למסלול הווקטורי בציר Y
+
+        Circle startPoint = new Circle(currentX, currentY, 5, Color.BLACK); // נקודת התחלה
+        nodesLayer.getChildren().add(startPoint); // הוספת נקודת התחלה
+
+        for (SpaceManager.VectorExpressionTerm term : terms) { // ציור מסלול לפי איברי הביטוי
+            WordVector wordVector = spaceManager.getWordVector(term.getWord()); // וקטור של המילה
+
+            if (wordVector == null) continue; // אם המילה לא קיימת, מדלגים
+
+            double[] vector = wordVector.getVector(); // ערכי הווקטור
+
+            double nextX = currentX + term.getSign() * vector[axisX] * 500; // יעד X הבא
+            double nextY = currentY + term.getSign() * vector[axisY] * 500; // יעד Y הבא
+
+            Line stepLine = new Line(currentX, currentY, nextX, nextY); // קו של צעד אחד בביטוי
+
+            if (term.getSign() >= 0) {
+                stepLine.setStroke(Color.GREEN); // פלוס בירוק
+            } else {
+                stepLine.setStroke(Color.RED); // מינוס באדום
+            }
+
+            stepLine.setStrokeWidth(2.5); // עובי הקו
+            stepLine.getStrokeDashArray().addAll(6d, 6d); // קו מקווקו
+
+            linesLayer.getChildren().add(stepLine); // הוספת הקו למסך
+
+            currentX = nextX; // עדכון נקודת התחלה לצעד הבא
+            currentY = nextY; // עדכון נקודת התחלה לצעד הבא
+        }
+
+        Circle expressionResultPoint = new Circle(currentX, currentY, 7, Color.GOLD); // נקודת תוצאת הביטוי
+        nodesLayer.getChildren().add(expressionResultPoint); // הוספת נקודת התוצאה
+
+        Text expressionResultLabel = new Text(currentX + 10, currentY + 10, "VECTOR RESULT"); // טקסט לתוצאה הווקטורית
+        expressionResultLabel.setFill(Color.GOLD); // צבע זהב
+        expressionResultLabel.setStyle("-fx-font-weight: bold;"); // עיצוב טקסט
+        nodesLayer.getChildren().add(expressionResultLabel); // הוספת הטקסט
+
+        if (resultCircle != null) { // אם נמצאה מילה קרובה לתוצאה
+            Line resultConnection = new Line(
+                    currentX,
+                    currentY,
+                    resultCircle.getCenterX(),
+                    resultCircle.getCenterY()
+            ); // קו בין התוצאה המתמטית למילה הקרובה
+
+            resultConnection.setStroke(Color.ORANGE); // צבע כתום
+            resultConnection.setStrokeWidth(2.0); // עובי הקו
+            resultConnection.getStrokeDashArray().addAll(4d, 4d); // קו מקווקו
+
+            linesLayer.getChildren().add(resultConnection); // הוספת הקו
+        }
     }
 
-    // מחשב מרכז כובד של קבוצת מילים ומציג את השכנים שלו
+    // מחשב מרכז כובד ומציג את השכנים שלו
     private void handleCentroid(List<String> selectedWords, int k) {
-        if (selectedWords == null || selectedWords.isEmpty()) return;
+        if (selectedWords == null || selectedWords.isEmpty()) return; // אין מילים לחישוב
 
         try {
-            isProjectedMode = false;
-            renderPoints();
-            nodeMap.values().forEach(c -> { c.setFill(Color.GRAY); c.setRadius(2); }); // מאפיר רקע
-            linesLayer.getChildren().clear();
+            isProjectedMode = false; // יציאה מהקרנה
+            renderPoints(); // ציור מחדש
 
-            for (String w : selectedWords) {
-                Circle c = nodeMap.get(w);
-                if (c != null) { c.setFill(Color.GREEN); c.setRadius(5); } // סימון מילים שנבחרו
+            nodeMap.values().forEach(c -> {
+                c.setFill(Color.GRAY); // מאפיר רקע
+                c.setRadius(2); // מקטין רקע
+            });
+
+            linesLayer.getChildren().clear(); // ניקוי קווים
+
+            for (String w : selectedWords) { // מעבר על המילים שנבחרו
+                Circle c = nodeMap.get(w); // העיגול של המילה
+
+                if (c != null) {
+                    c.setFill(Color.GREEN); // סימון מילים שנבחרו
+                    c.setRadius(5); // הגדלת מילים שנבחרו
+                }
             }
 
             double[] centroid = spaceManager.calculateCentroid(selectedWords); // חישוב מרכז כובד
-            if (centroid == null || centroid.length < 2) return;
+
+            if (centroid == null || centroid.length < 2) return; // בדיקת תקינות
 
             double cx = centroid[axisX] * 500 + 450; // מיקום X של המרכז
             double cy = centroid[axisY] * 500 + 400; // מיקום Y של המרכז
 
-            Circle centroidPoint = new Circle(cx, cy, 6, Color.MAGENTA); // נקודת המרכז
+            Circle centroidPoint = new Circle(cx, cy, 6, Color.MAGENTA); // נקודת centroid
+
             Text cLabel = new Text(cx + 8, cy, "Centroid"); // טקסט ליד המרכז
-            cLabel.setFill(Color.MAGENTA);
-            cLabel.setStyle("-fx-font-weight: bold;");
-            nodesLayer.getChildren().addAll(centroidPoint, cLabel);
+            cLabel.setFill(Color.MAGENTA); // צבע הטקסט
+            cLabel.setStyle("-fx-font-weight: bold;"); // עיצוב
 
-            List<SpaceManager.WordDistancePair> neighbors = spaceManager.findNearestNeighborsToVector(centroid, k, getCurrentMetric(), null); // שכנים למרכז
-            neighborsTable.setItems(FXCollections.observableArrayList(neighbors));
+            nodesLayer.getChildren().addAll(centroidPoint, cLabel); // הוספת centroid למסך
 
-            for (SpaceManager.WordDistancePair pair : neighbors) {
-                Circle neighborCircle = nodeMap.get(pair.getWord());
+            List<SpaceManager.WordDistancePair> neighbors =
+                    spaceManager.findNearestNeighborsToVector(
+                            centroid,
+                            k,
+                            getCurrentMetric(),
+                            null
+                    ); // מציאת K שכנים ל-centroid
+
+            neighborsTable.setItems(FXCollections.observableArrayList(neighbors)); // הצגת שכנים בטבלה
+
+            for (SpaceManager.WordDistancePair pair : neighbors) { // מעבר על השכנים
+                Circle neighborCircle = nodeMap.get(pair.getWord()); // העיגול של השכן
+
                 if (neighborCircle != null) {
-                    neighborCircle.setFill(Color.BLUE); neighborCircle.setRadius(4); // סימון שכן
-                    Line line = new Line(cx, cy, neighborCircle.getCenterX(), neighborCircle.getCenterY()); // קו מהמרכז לשכן
-                    line.setStroke(Color.MAGENTA);
-                    line.setStrokeWidth(2.0);
-                    linesLayer.getChildren().add(line);
+                    neighborCircle.setFill(Color.BLUE); // סימון שכן בכחול
+                    neighborCircle.setRadius(4); // הגדלת שכן
+
+                    Line line = new Line(
+                            cx,
+                            cy,
+                            neighborCircle.getCenterX(),
+                            neighborCircle.getCenterY()
+                    ); // קו מה-centroid לשכן
+
+                    line.setStroke(Color.MAGENTA); // צבע הקו
+                    line.setStrokeWidth(2.0); // עובי הקו
+
+                    linesLayer.getChildren().add(line); // הוספת הקו למסך
                 }
             }
         } catch (Exception ex) {
-            new Alert(Alert.AlertType.ERROR, "Error calculating centroid: " + ex.getMessage()).show();
+            new Alert(Alert.AlertType.ERROR, "Error calculating centroid: " + ex.getMessage()).show(); // שגיאה בחישוב
         }
     }
+    // מחשב ביטוי וקטורי כללי ומציג אותו ב-3D
+    private void handleVectorExpression3D(List<SpaceManager.VectorExpressionTerm> terms) {
+        if (terms == null || terms.isEmpty()) { // אם אין איברים בביטוי
+            new Alert(Alert.AlertType.WARNING, "Please add at least one word to the expression.").show();
+            return;
+        }
 
-    // מציג את כל המילים על ציר חד ממדי בין 2 מילים שנבחרו
+        double[] resultVector = spaceManager.calculateVectorExpression(terms); // חישוב תוצאת הביטוי
+
+        if (resultVector == null) { // אם החישוב נכשל
+            new Alert(Alert.AlertType.WARNING, "Could not calculate vector expression.").show();
+            return;
+        }
+
+        List<String> excludeWords = new ArrayList<>(); // מילים שלא נרצה להחזיר כתוצאה
+
+        for (SpaceManager.VectorExpressionTerm term : terms) {
+            excludeWords.add(term.getWord()); // מחריג את המילים שהשתתפו בביטוי
+        }
+
+        List<SpaceManager.WordDistancePair> closest =
+                spaceManager.findNearestNeighborsToVector(
+                        resultVector,
+                        1,
+                        getCurrentMetric(),
+                        excludeWords
+                ); // מציאת המילה הקרובה ביותר לתוצאה
+
+        String closestWord = closest.isEmpty() ? null : closest.get(0).getWord(); // המילה הקרובה ביותר
+
+        new Space3DViewer().showVectorExpression(spaceManager, terms, resultVector, closestWord); // שליחה לתצוגת 3D
+    }
+
+    // מציג את כל המילים על ציר חד־ממדי בין שתי מילים
     private void renderProjectedAxis(String w1, String w2) {
-        isProjectedMode = true;
-        nodesLayer.getChildren().clear();
-        linesLayer.getChildren().clear();
-        nodeMap.clear();
+        isProjectedMode = true; // מעבר למצב הקרנה
 
-        Line axisLine = new Line(50, 400, 1150, 400); // ציר ההקרנה
-        axisLine.setStroke(Color.BLACK);
-        axisLine.setStrokeWidth(2);
-        linesLayer.getChildren().add(axisLine);
+        nodesLayer.getChildren().clear(); // ניקוי נקודות
+        linesLayer.getChildren().clear(); // ניקוי קווים
+        nodeMap.clear(); // ניקוי מפת נקודות
 
-        double minProj = Double.MAX_VALUE; // ערך הקרנה מינימלי
-        double maxProj = -Double.MAX_VALUE; // ערך הקרנה מקסימלי
-        Map<String, Double> projections = new HashMap<>(); // שומר הקרנה לכל מילה
+        Line axisLine = new Line(50, 400, 1150, 400); // קו הציר
+        axisLine.setStroke(Color.BLACK); // צבע הציר
+        axisLine.setStrokeWidth(2); // עובי הציר
 
-        for (String word : spaceManager.getAllWords()) {
-            double proj = spaceManager.getProjectionValue(word, w1, w2); // חישוב הקרנה של מילה על הציר
-            if (Double.isNaN(proj)) proj = 0.0;
+        linesLayer.getChildren().add(axisLine); // הוספת הציר
 
-            projections.put(word, proj);
+        double minProj = Double.MAX_VALUE; // הקרנה מינימלית
+        double maxProj = -Double.MAX_VALUE; // הקרנה מקסימלית
 
-            if (proj < minProj) minProj = proj;
-            if (proj > maxProj) maxProj = proj;
+        Map<String, Double> projections = new HashMap<>(); // מילה -> ערך הקרנה
+
+        for (String word : spaceManager.getAllWords()) { // מחשב הקרנה לכל מילה
+            double proj = spaceManager.getProjectionValue(word, w1, w2); // ערך הקרנה
+
+            if (Double.isNaN(proj)) proj = 0.0; // טיפול במקרה לא תקין
+
+            projections.put(word, proj); // שמירת ערך ההקרנה
+
+            if (proj < minProj) minProj = proj; // עדכון מינימום
+            if (proj > maxProj) maxProj = proj; // עדכון מקסימום
         }
 
         double range = maxProj - minProj; // טווח ההקרנות
-        if (range <= 0) range = 1.0;
 
-        /*
-         * מסדרים את המילים לפי המיקום שלהן על הציר,
-         * כדי להציג רק חלק מהשמות בצורה מסודרת.
-         */
-        List<Map.Entry<String, Double>> sortedEntries = new ArrayList<>(projections.entrySet());
-        sortedEntries.sort(Map.Entry.comparingByValue());
+        if (range <= 0) range = 1.0; // מניעת חלוקה באפס
 
-        double lastLabelX = -9999; // שומר איפה הוצגה התווית האחרונה
-        double minLabelDistance = 75; // מרחק מינימלי בין תוויות
-        int labelCount = 0; // כדי להציג תווית פעם למעלה ופעם למטה
+        List<Map.Entry<String, Double>> sortedEntries = new ArrayList<>(projections.entrySet()); // רשימת הקרנות
+        sortedEntries.sort(Map.Entry.comparingByValue()); // מיון לפי מיקום על הציר
 
-        for (Map.Entry<String, Double> entry : sortedEntries) {
-            String word = entry.getKey();
+        double lastLabelX = -9999; // מיקום התווית האחרונה
+        double minLabelDistance = 75; // מרחק מינימלי בין שמות
+        int labelCount = 0; // סופר תוויות כדי לשים פעם למעלה ופעם למטה
 
-            double normalizedProj = (entry.getValue() - minProj) / range; // נרמול לערך בין 0 ל-1
-            double x = 100 + (normalizedProj * 1000); // התאמה לרוחב המסך
-            double y = 400;
+        for (Map.Entry<String, Double> entry : sortedEntries) { // ציור כל המילים על הציר
+            String word = entry.getKey(); // המילה הנוכחית
 
-            boolean isAxisWord = word.equals(w1) || word.equals(w2); // האם זו אחת מהמילים שמגדירות את הציר
+            double normalizedProj = (entry.getValue() - minProj) / range; // נרמול בין 0 ל-1
+            double x = 100 + (normalizedProj * 1000); // המרה למיקום במסך
+            double y = 400; // כל הנקודות נמצאות על אותו ציר Y
 
-            Color dotColor = isAxisWord ? Color.GREEN : Color.BLACK;
-            double dotRadius = isAxisWord ? 8 : 5;
+            boolean isAxisWord = word.equals(w1) || word.equals(w2); // האם זו אחת ממילות הציר
 
-            Circle dot = new Circle(x, y, dotRadius, dotColor); // נקודה שמייצגת מילה
+            Color dotColor = isAxisWord ? Color.GREEN : Color.BLACK; // מילות ציר בירוק
+            double dotRadius = isAxisWord ? 8 : 5; // מילות ציר גדולות יותר
+
+            Circle dot = new Circle(x, y, dotRadius, dotColor); // נקודה על הציר
 
             dot.setOnMouseClicked(e -> executeViewCommand(() -> probeNearestNeighbors(word))); // לחיצה מציגה שכנים
 
-            Tooltip tooltip = new Tooltip(word); // שם המילה במעבר עכבר
-            tooltip.setShowDelay(Duration.ZERO);
-            Tooltip.install(dot, tooltip);
+            Tooltip tooltip = new Tooltip(word); // Tooltip לשם המילה
+            tooltip.setShowDelay(Duration.ZERO); // הופעה מיידית
+            Tooltip.install(dot, tooltip); // חיבור Tooltip
 
-            nodeMap.put(word, dot);
-            nodesLayer.getChildren().add(dot);
+            nodeMap.put(word, dot); // שמירת הנקודה
+            nodesLayer.getChildren().add(dot); // הוספת הנקודה
 
-            /*
-             * מציגים שם רק אם זו אחת ממילות הציר,
-             * או אם יש מספיק מרחק מהשם הקודם.
-             * ככה רואים מילים בדרך בלי להציף את המסך.
-             */
-            boolean shouldShowLabel = isAxisWord || Math.abs(x - lastLabelX) >= minLabelDistance;
+            boolean shouldShowLabel = isAxisWord || Math.abs(x - lastLabelX) >= minLabelDistance; // האם להציג שם
 
-            if (shouldShowLabel) {
-                Text label = new Text(word);
+            if (shouldShowLabel) { // מציגים שם רק אם יש מקום או זו מילת ציר
+                Text label = new Text(word); // טקסט שם המילה
 
                 if (isAxisWord) {
-                    label.setFill(Color.GREEN);
+                    label.setFill(Color.GREEN); // שם של מילת ציר בירוק
                     label.setStyle("-fx-font-weight: bold; -fx-font-size: 14px;");
                 } else {
-                    label.setFill(Color.BLACK);
+                    label.setFill(Color.BLACK); // שם רגיל בשחור
                 }
 
-                double labelY;
+                double labelY; // מיקום הטקסט בציר Y
+
                 if (labelCount % 2 == 0) {
-                    labelY = y - 18; // תווית מעל הציר
+                    labelY = y - 18; // פעם מעל הציר
                 } else {
-                    labelY = y + 35; // תווית מתחת לציר
+                    labelY = y + 35; // פעם מתחת לציר
                 }
 
-                label.setX(x - 15);
-                label.setY(labelY);
+                label.setX(x - 15); // מיקום X של הטקסט
+                label.setY(labelY); // מיקום Y של הטקסט
 
-                Line connector = new Line(x, y, x - 5, labelY - 4); // קו קטן בין הנקודה לתווית
-                connector.setStroke(Color.LIGHTGRAY);
-                connector.setStrokeWidth(1.0);
+                Line connector = new Line(x, y, x - 5, labelY - 4); // קו קטן מהנקודה לשם
+                connector.setStroke(Color.LIGHTGRAY); // צבע קו עזר
+                connector.setStrokeWidth(1.0); // עובי קו עזר
 
-                nodesLayer.getChildren().addAll(connector, label);
+                nodesLayer.getChildren().addAll(connector, label); // הוספת קו ושם
 
-                lastLabelX = x;
-                labelCount++;
+                lastLabelX = x; // עדכון מיקום שם אחרון
+                labelCount++; // עדכון מספר תוויות
             }
         }
     }
-    // מחפש מילה ומציג את 5 השכנים הקרובים אליה
+
+    // מחפש מילה ומציג את 5 השכנים הקרובים שלה
     private void probeNearestNeighbors(String rawTarget) {
-        if (isProjectedMode) { isProjectedMode = false; renderPoints(); } // אם היינו בהקרנה, חוזרים לתצוגה רגילה
-
-        nodeMap.values().forEach(c -> { c.setFill(Color.GRAY); c.setRadius(2); }); // מאפיר את כל הנקודות
-        linesLayer.getChildren().clear();
-
-        String foundWord = null;
-        for (String wordInMap : nodeMap.keySet()) {
-            if (wordInMap.equalsIgnoreCase(rawTarget.trim())) { foundWord = wordInMap; break; } // חיפוש בלי רגישות לאותיות גדולות
+        if (isProjectedMode) { // אם נמצאים במצב הקרנה
+            isProjectedMode = false; // יוצאים מהקרנה
+            renderPoints(); // חוזרים לתצוגה רגילה
         }
 
-        if (foundWord != null) {
-            Circle targetCircle = nodeMap.get(foundWord);
-            targetCircle.setFill(Color.RED); targetCircle.setRadius(6); // סימון המילה שנמצאה
-            drawingPane.setTranslateX(450 - targetCircle.getCenterX()); // מזיז את התצוגה לכיוון המילה
-            drawingPane.setTranslateY(400 - targetCircle.getCenterY());
+        nodeMap.values().forEach(c -> {
+            c.setFill(Color.GRAY); // מאפיר רקע
+            c.setRadius(2); // מקטין רקע
+        });
 
-            List<SpaceManager.WordDistancePair> neighbors = spaceManager.findNearestNeighbors(foundWord, 5, getCurrentMetric()); // חיפוש 5 שכנים
-            neighborsTable.setItems(FXCollections.observableArrayList(neighbors));
+        linesLayer.getChildren().clear(); // ניקוי קווים
 
-            for (SpaceManager.WordDistancePair pair : neighbors) {
-                Circle nCircle = nodeMap.get(pair.getWord());
+        String foundWord = null; // המילה שנמצאה בפועל
+
+        for (String wordInMap : nodeMap.keySet()) { // חיפוש לא רגיש לאותיות גדולות
+            if (wordInMap.equalsIgnoreCase(rawTarget.trim())) {
+                foundWord = wordInMap; // שמירת השם האמיתי מהמפה
+                break;
+            }
+        }
+
+        if (foundWord != null) { // אם המילה נמצאה
+            Circle targetCircle = nodeMap.get(foundWord); // העיגול של המילה
+
+            targetCircle.setFill(Color.RED); // סימון המילה באדום
+            targetCircle.setRadius(6); // הגדלת המילה
+
+            drawingPane.setTranslateX(450 - targetCircle.getCenterX()); // מרכז את התצוגה לפי X
+            drawingPane.setTranslateY(400 - targetCircle.getCenterY()); // מרכז את התצוגה לפי Y
+
+            List<SpaceManager.WordDistancePair> neighbors =
+                    spaceManager.findNearestNeighbors(foundWord, 5, getCurrentMetric()); // מציאת 5 שכנים
+
+            neighborsTable.setItems(FXCollections.observableArrayList(neighbors)); // הצגת השכנים בטבלה
+
+            for (SpaceManager.WordDistancePair pair : neighbors) { // מעבר על כל שכן
+                Circle nCircle = nodeMap.get(pair.getWord()); // העיגול של השכן
+
                 if (nCircle != null) {
-                    nCircle.setFill(Color.BLUE); nCircle.setRadius(4); // סימון שכן
-                    Line line = new Line(targetCircle.getCenterX(), targetCircle.getCenterY(), nCircle.getCenterX(), nCircle.getCenterY()); // קו לשכן
-                    line.setStroke(Color.BLACK);
-                    line.setStrokeWidth(1.5);
-                    linesLayer.getChildren().add(line);
+                    nCircle.setFill(Color.BLUE); // סימון שכן בכחול
+                    nCircle.setRadius(4); // הגדלת שכן
+
+                    Line line = new Line(
+                            targetCircle.getCenterX(),
+                            targetCircle.getCenterY(),
+                            nCircle.getCenterX(),
+                            nCircle.getCenterY()
+                    ); // קו בין המילה לשכן
+
+                    line.setStroke(Color.BLACK); // צבע הקו
+                    line.setStrokeWidth(1.5); // עובי הקו
+
+                    linesLayer.getChildren().add(line); // הוספת הקו למסך
                 }
             }
         } else {
-            new Alert(Alert.AlertType.WARNING, "Word '" + rawTarget + "' not found.").show();
+            new Alert(Alert.AlertType.WARNING, "Word '" + rawTarget + "' not found.").show(); // הודעה אם המילה לא קיימת
         }
     }
 
-    // יוצר ComboBox לבחירת ממד מתוך הווקטור
-    private ComboBox<Integer> createAxisCombo(int defaultValue) {
-        ComboBox<Integer> combo = new ComboBox<>();
-
-        int dimensions = getVectorDimension(); // מספר הממדים שיש בפועל בקובץ
-
-        for (int i = 0; i < dimensions; i++) {
-            combo.getItems().add(i); // מוסיף ממדים 0 עד dimensions-1
-        }
-
-        if (dimensions > defaultValue) {
-            combo.setValue(defaultValue);
-        } else if (dimensions > 0) {
-            combo.setValue(0);
-        }
-
-        return combo;
-    }
-
-    // מחזיר את מספר הממדים של הווקטורים שנטענו
+    // מחזיר את מספר הממדים של הווקטורים
     private int getVectorDimension() {
-        if (spaceManager.getAllWords().isEmpty()) return 0;
+        if (spaceManager.getAllWords().isEmpty()) return 0; // אם אין מילים, אין ממדים
 
-        String firstWord = spaceManager.getAllWords().iterator().next();
-        return spaceManager.getWordVector(firstWord).getDimension();
-    }
+        String firstWord = spaceManager.getAllWords().iterator().next(); // לוקח מילה אחת לבדיקה
 
-    // מוסיף שליטה עם העכבר גרירה להזזת מסך וגלילה לזום
-    private void setupInteractions() {
-        final double[] mouseAnchor = new double[2]; // מיקום העכבר בתחילת גרירה
-        final double[] translateAnchor = new double[2]; // מיקום התצוגה בתחילת גרירה
-
-        drawingPane.setOnMousePressed(e -> {
-            mouseAnchor[0] = e.getSceneX(); mouseAnchor[1] = e.getSceneY();
-            translateAnchor[0] = drawingPane.getTranslateX(); translateAnchor[1] = drawingPane.getTranslateY();
-        });
-
-        drawingPane.setOnMouseDragged(e -> {
-            drawingPane.setTranslateX(translateAnchor[0] + (e.getSceneX() - mouseAnchor[0])); // הזזה בציר X
-            drawingPane.setTranslateY(translateAnchor[1] + (e.getSceneY() - mouseAnchor[1])); // הזזה בציר Y
-        });
-
-        drawingPane.setOnScroll(e -> {
-            double zoom = e.getDeltaY() > 0 ? 1.1 : 0.9; // גלילה למעלה מקרבת, למטה מרחיקה
-            drawingPane.setScaleX(drawingPane.getScaleX() * zoom);
-            drawingPane.setScaleY(drawingPane.getScaleY() * zoom);
-        });
+        return spaceManager.getWordVector(firstWord).getDimension(); // מחזיר את אורך הווקטור שלה
     }
 
     public static void main(String[] args) {
-        launch(args); // הפעלת אפליקציית JavaFX
+        launch(args); // הפעלת JavaFX
     }
 }
