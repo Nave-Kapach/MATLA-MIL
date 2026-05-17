@@ -18,3 +18,15 @@ For example:
 
 ```text
 king - man + woman ≈ queen
+
+## Features
+
+Load word vectors from a JSON file
+Calculate semantic distance between two words
+Find nearest neighbors of a selected word
+Perform word analogies
+Calculate the centroid of multiple words
+Visualize words in 2D
+Visualize words in 3D
+Support different distance metrics
+Support undo and redo actions
