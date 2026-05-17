@@ -208,7 +208,6 @@ public class MainApp extends Application {
     }
 
     // בונה את טאב שלב א באמצעות מחלקה חיצונית
-    // בונה את טאב שלב א באמצעות מחלקה חיצונית
     private VBox buildStageATab() {
         List<String> words = new ArrayList<>(spaceManager.getAllWords());
 
